@@ -3,11 +3,14 @@ import { isImageFile } from "./utils.js";
 export class NotificationCenter {
   constructor() {
     this.notifications = [];
+    this.snoozedNotifications = [];
     this.isOpen = false;
     this.maxNotifications = 50;
     this.notificationId = 0;
+    this.doNotDisturb = this._loadDoNotDisturb();
     this.createNotificationCenterUI();
     this.setupTaskbarButton();
+    this.updateDoNotDisturbUI();
   }
 
   createNotificationCenterUI() {
@@ -19,6 +22,7 @@ export class NotificationCenter {
     centerContainer.innerHTML = `
       <div class="ntf-panel__head">
         <span>Notifications</span>
+        <button class="ntf-panel__dnd" title="Do Not Disturb">DND</button>
         <button class="ntf-panel__dismiss" title="Close">×</button>
       </div>
       <div class="ntf-panel__feed"></div>
@@ -31,6 +35,10 @@ export class NotificationCenter {
 
     centerContainer.querySelector(".ntf-panel__dismiss").addEventListener("click", () => {
       this.closeCenter();
+    });
+
+    centerContainer.querySelector(".ntf-panel__dnd").addEventListener("click", () => {
+      this.setDoNotDisturb(!this.doNotDisturb);
     });
 
     centerContainer.querySelector(".ntf-purge-btn").addEventListener("click", () => {
@@ -70,12 +78,14 @@ export class NotificationCenter {
       icon
     };
 
-    this.notifications.unshift(notification);
-
-    if (this.notifications.length > this.maxNotifications) {
-      this.notifications.pop();
+    if (this.doNotDisturb) {
+      this.snoozedNotifications.unshift(notification);
+      this._enforceMaxNotifications();
+      return notification.id;
     }
 
+    this.notifications.unshift(notification);
+    this._enforceMaxNotifications();
     this.updateNotificationCenter();
     this.updateBadge();
 
@@ -84,12 +94,14 @@ export class NotificationCenter {
 
   removeNotification(id) {
     this.notifications = this.notifications.filter((n) => n.id !== id);
+    this.snoozedNotifications = this.snoozedNotifications.filter((n) => n.id !== id);
     this.updateNotificationCenter();
     this.updateBadge();
   }
 
   clearAllNotifications() {
     this.notifications = [];
+    this.snoozedNotifications = [];
     this.updateNotificationCenter();
     this.updateBadge();
   }
@@ -100,7 +112,11 @@ export class NotificationCenter {
 
     list.innerHTML = "";
 
-    if (this.notifications.length === 0) {
+    const visibleNotifications = this.doNotDisturb
+      ? [...this.snoozedNotifications, ...this.notifications]
+      : this.notifications;
+
+    if (visibleNotifications.length === 0) {
       const empty = document.createElement("div");
       empty.className = "ntf-panel__blank";
       empty.textContent = "No notifications";
@@ -108,7 +124,7 @@ export class NotificationCenter {
       return;
     }
 
-    this.notifications.forEach((notif) => {
+    visibleNotifications.forEach((notif) => {
       const item = document.createElement("div");
       const typeMap = {
         info: "ntf-card--info",
@@ -166,6 +182,11 @@ export class NotificationCenter {
     const badge = document.querySelector(".ntf-count");
     if (!badge) return;
 
+    if (this.doNotDisturb) {
+      badge.style.display = "none";
+      return;
+    }
+
     const count = this.notifications.length;
     if (count > 0) {
       badge.textContent = count > 99 ? "99+" : count;
@@ -205,6 +226,54 @@ export class NotificationCenter {
     if (btn) btn.classList.remove("active");
   }
 
+  setDoNotDisturb(enabled) {
+    this.doNotDisturb = Boolean(enabled);
+    try {
+      localStorage.setItem("wm_ntf_dnd", this.doNotDisturb ? "1" : "0");
+    } catch {
+      // ignore
+    }
+
+    if (!this.doNotDisturb && this.snoozedNotifications.length > 0) {
+      // Flush in reverse so the newest snoozed stays newest overall.
+      for (let i = this.snoozedNotifications.length - 1; i >= 0; i--) {
+        this.notifications.unshift(this.snoozedNotifications[i]);
+      }
+      this.snoozedNotifications = [];
+      this._enforceMaxNotifications();
+    }
+
+    this.updateDoNotDisturbUI();
+    this.updateNotificationCenter();
+    this.updateBadge();
+  }
+
+  _loadDoNotDisturb() {
+    try {
+      return localStorage.getItem("wm_ntf_dnd") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  _enforceMaxNotifications() {
+    while (this.notifications.length + this.snoozedNotifications.length > this.maxNotifications) {
+      if (this.notifications.length > 0) {
+        this.notifications.pop();
+      } else {
+        this.snoozedNotifications.pop();
+      }
+    }
+  }
+
+  updateDoNotDisturbUI() {
+    const dndBtn = document.querySelector(".ntf-panel__dnd");
+    if (dndBtn) dndBtn.classList.toggle("active", this.doNotDisturb);
+
+    const trayBtn = document.getElementById("ntf-tray-btn");
+    if (trayBtn) trayBtn.classList.toggle("ntf-tray-btn--dnd", this.doNotDisturb);
+  }
+
   formatTime(date) {
     const now = new Date();
     const diffMs = now - date;
@@ -221,10 +290,10 @@ export class NotificationCenter {
   }
 
   getNotifications() {
-    return [...this.notifications];
+    return [...this.notifications, ...this.snoozedNotifications];
   }
 
   getNotificationCount() {
-    return this.notifications.length;
+    return this.notifications.length + this.snoozedNotifications.length;
   }
 }

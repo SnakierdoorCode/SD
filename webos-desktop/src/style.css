@@ -5148,13 +5148,46 @@ body.is-resizing * {
   padding: 12px 16px;
   border-bottom: 1px solid #2d2d2d;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
   align-items: var(--wm-notif-header-align, center);
   background: #252525;
   border-radius: 8px 8px 0 0;
   font-weight: 600;
   font-size: 14px;
   color: #e0e0e0;
+}
+
+.ntf-panel__dnd {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  color: #bdbdbd;
+  padding: 0 10px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+
+.ntf-panel__dnd:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.ntf-panel__dnd.active {
+  background: rgba(255, 68, 68, 0.18);
+  border-color: rgba(255, 68, 68, 0.35);
+  color: #ffb0b0;
 }
 
 .ntf-panel__dismiss {
@@ -5217,7 +5250,7 @@ body.is-resizing * {
 
 .ntf-card {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 12px;
   padding: 12px;
   margin-bottom: 8px;
@@ -5319,6 +5352,8 @@ body.is-resizing * {
   align-items: center;
   justify-content: center;
   border-radius: 3px;
+  justify-self: end;
+  align-self: start;
   transition:
     background 0.2s,
     color 0.2s;
@@ -5378,6 +5413,18 @@ body.is-resizing * {
 
 .ntf-tray-btn.active {
   background: rgba(0, 120, 215, 0.25);
+}
+
+.ntf-tray-btn.ntf-tray-btn--dnd::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 68, 68, 0.95);
+  box-shadow: 0 0 0 2px rgba(30, 30, 30, 0.9);
 }
 
 .ntf-tray-btn svg {
