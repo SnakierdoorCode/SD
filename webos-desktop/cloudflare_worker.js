@@ -1,0 +1,1399 @@
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const clientIP = request.headers.get("CF-Connecting-IP");
+
+    if (!clientIP) {
+      return new Response("Missing IP", { status: 400, headers: corsHeaders() });
+    }
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+
+    const rawBlacklist = (env.BLACKLIST_IPS || "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    function ipBlocked(ip) {
+      for (const rule of rawBlacklist) {
+        if (rule === ip) return true;
+        if (rule.includes("*")) {
+          const prefix = rule.split("*")[0];
+          if (ip.startsWith(prefix)) return true;
+        }
+      }
+      return false;
+    }
+
+    async function deriveDailyId(ip) {
+      const secret = env.FINGERPRINT_SECRET;
+      if (!secret) return "no-secret-configured";
+      const date = new Date().toISOString().slice(0, 10);
+      const message = `${date}:${ip}`;
+      const keyMaterial = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(secret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+      const signature = await crypto.subtle.sign("HMAC", keyMaterial, new TextEncoder().encode(message));
+      const hex = Array.from(new Uint8Array(signature))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      return hex.slice(0, 32);
+    }
+
+    async function sendEmbed(embed) {
+      if (!env.DISCORD_WEBHOOK_URL) return;
+      await fetch(env.DISCORD_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embeds: [embed] })
+      });
+    }
+
+    async function sendReportEmbed(embed) {
+      const webhook = env.DISCORD_REPORT_WEBHOOK_URL || env.DISCORD_WEBHOOK_URL;
+      if (!webhook) return;
+      await fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embeds: [embed] })
+      });
+    }
+
+    function jsonResponse(data, status = 200) {
+      return new Response(JSON.stringify(data), { status, headers: corsHeaders() });
+    }
+
+    function normalizeApp(name) {
+      if (!name) return "unknown";
+      return name.toLowerCase().trim();
+    }
+
+    function displayApp(name) {
+      if (!name) return "Unknown";
+      let s = name.trim();
+      if (s.toLowerCase().endsWith("app")) {
+        s = s.slice(0, -3).trim();
+        s = s.replace(/([a-z])([A-Z])/g, "$1 $2");
+        s = s.charAt(0).toUpperCase() + s.slice(1);
+        return s + " App";
+      }
+      s = s.replace(/([a-z])([A-Z])/g, "$1 $2");
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    const authSecret = env.KV_AUTH_SECRET;
+
+    function checkAuth(req) {
+      const authHeader = req.headers.get("Authorization");
+      return authHeader === `Bearer ${authSecret}`;
+    }
+
+    if (url.pathname === "/") {
+      return new Response("Api is working!", { headers: corsHeaders("text/plain") });
+    }
+
+    if (url.pathname === "/admin") {
+      return new Response(adminHTML(), { headers: corsHeaders("text/html") });
+    }
+
+    if (url.pathname.startsWith("/admin/")) {
+      if (!checkAuth(request)) {
+        return jsonResponse({ error: "Unauthorized" }, 401);
+      }
+    }
+
+    if (url.pathname === "/api/report-broken" && request.method === "POST") {
+      let payload;
+      try {
+        payload = await request.json();
+      } catch {
+        return jsonResponse({ error: "invalid json" }, 400);
+      }
+      const { appId, title, reason } = payload;
+      if (!appId || !title) {
+        return jsonResponse({ error: "missing appId or title" }, 400);
+      }
+      const ipHash = (await deriveDailyId(clientIP)).slice(0, 12);
+      await sendReportEmbed({
+        title: "🚨 Broken Game Reported",
+        color: 15158332,
+        fields: [
+          { name: "Game Title", value: title, inline: true },
+          { name: "App ID", value: appId, inline: true },
+          { name: "Reason", value: reason || "No reason provided", inline: false },
+          { name: "Reporter ID", value: ipHash, inline: false },
+          { name: "Timestamp", value: new Date().toISOString(), inline: false }
+        ]
+      });
+      return jsonResponse({ success: true });
+    }
+
+    if (url.pathname === "/analytics" && request.method === "POST") {
+      if (ipBlocked(clientIP)) {
+        return jsonResponse({ error: "Forbidden" }, 403);
+      }
+      let payload;
+      try {
+        payload = await request.json();
+      } catch {
+        return jsonResponse({ error: "invalid json" }, 400);
+      }
+      if (payload.app) {
+        payload.app = normalizeApp(payload.app);
+      }
+      const id = crypto.randomUUID();
+      const timestamp = new Date().toISOString();
+      const dailyId = await deriveDailyId(clientIP);
+      await env.DB.prepare("INSERT INTO analytics (id, daily_id, timestamp, data) VALUES (?, ?, ?, ?)")
+        .bind(id, dailyId, timestamp, JSON.stringify(payload))
+        .run();
+      await sendEmbed({
+        title: "New Analytics Event",
+        color: 3066993,
+        fields: [
+          { name: "ID", value: id, inline: false },
+          { name: "Day Token", value: dailyId, inline: false },
+          { name: "Timestamp", value: timestamp, inline: false }
+        ],
+        description: "```json\n" + JSON.stringify(payload, null, 2) + "\n```",
+        timestamp
+      });
+      return jsonResponse({ status: "ok", id });
+    }
+
+    if (url.pathname === "/admin/stats" && request.method === "GET") {
+      const range = url.searchParams.get("range") || "30d";
+      let days = 30;
+      if (range === "7d") days = 7;
+      if (range === "90d") days = 90;
+      if (range === "1y") days = 365;
+
+      const daily = await env.DB.prepare(
+        `SELECT
+           date(timestamp)          AS day,
+           COUNT(*)                 AS requests,
+           COUNT(DISTINCT daily_id) AS unique_players
+         FROM analytics
+         WHERE timestamp >= datetime('now', '-' || ? || ' days')
+         GROUP BY day
+         ORDER BY day DESC`
+      )
+        .bind(days)
+        .all();
+
+      const topGames = await env.DB.prepare(
+        `SELECT
+           date(timestamp)                                          AS day,
+           lower(trim(json_extract(data, '$.app')))                AS app,
+           COUNT(*)                                                 AS count
+         FROM analytics
+         WHERE timestamp >= datetime('now', '-' || ? || ' days')
+           AND json_extract(data, '$.event') = 'launch'
+         GROUP BY day, app`
+      )
+        .bind(days)
+        .all();
+
+      const sessionsByDay = await env.DB.prepare(
+        `WITH ordered AS (
+           SELECT
+             daily_id,
+             timestamp,
+             date(timestamp) AS day,
+             LAG(timestamp) OVER (PARTITION BY daily_id ORDER BY timestamp) AS prev_ts
+           FROM analytics
+           WHERE timestamp >= datetime('now', '-' || ? || ' days')
+         ),
+         sessions AS (
+           SELECT
+             day,
+             daily_id,
+             SUM(CASE WHEN prev_ts IS NULL OR
+               (julianday(timestamp) - julianday(prev_ts)) * 86400 > 1800
+               THEN 1 ELSE 0 END) AS session_count
+           FROM ordered
+           GROUP BY day, daily_id
+         )
+         SELECT day, SUM(session_count) AS total_sessions
+         FROM sessions
+         GROUP BY day
+         ORDER BY day DESC`
+      )
+        .bind(days)
+        .all();
+
+      const sessionMap = {};
+      for (const row of sessionsByDay.results) {
+        sessionMap[row.day] = row.total_sessions;
+      }
+
+      const gamesByDay = {};
+      for (const row of topGames.results) {
+        if (!gamesByDay[row.day]) gamesByDay[row.day] = [];
+        gamesByDay[row.day].push({ app: row.app, count: row.count });
+      }
+      for (const day in gamesByDay) {
+        gamesByDay[day].sort((a, b) => b.count - a.count);
+      }
+
+      const enrichedDaily = daily.results.map((d) => ({
+        ...d,
+        requests_per_user: d.unique_players > 0 ? Math.round((d.requests / d.unique_players) * 10) / 10 : 0,
+        inferred_sessions: sessionMap[d.day] || 0
+      }));
+
+      return jsonResponse({ daily: enrichedDaily, topGames: gamesByDay });
+    }
+
+    if (url.pathname === "/admin/list" && request.method === "GET") {
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 100);
+      const offset = parseInt(url.searchParams.get("offset") || "0");
+      const result = await env.DB.prepare(
+        `SELECT id, daily_id, timestamp, data
+         FROM analytics
+         ORDER BY timestamp DESC
+         LIMIT ? OFFSET ?`
+      )
+        .bind(limit, offset)
+        .all();
+      return jsonResponse({ results: result.results });
+    }
+
+    if (url.pathname === "/admin/games" && request.method === "GET") {
+      const result = await env.DB.prepare(
+        `SELECT
+           lower(trim(json_extract(data, '$.app'))) AS app,
+           COUNT(*)                                  AS count
+         FROM analytics
+         WHERE json_extract(data, '$.event') = 'launch'
+         GROUP BY app
+         ORDER BY count DESC`
+      ).all();
+      return jsonResponse({ results: result.results });
+    }
+
+    if (url.pathname === "/admin/top-played-time-games" && request.method === "GET") {
+      const result = await env.DB.prepare(
+        `SELECT
+           lower(trim(json_extract(data, '$.app')))                  AS app,
+           COUNT(*)                                                   AS event_count,
+           SUM(
+             CASE
+               WHEN json_extract(data, '$.durationMs') IS NOT NULL
+               THEN CAST(json_extract(data, '$.durationMs') AS REAL)
+               ELSE 0
+             END
+           )                                                          AS total_time_ms
+         FROM analytics
+         WHERE json_extract(data, '$.durationMs') IS NOT NULL
+           AND json_extract(data, '$.app')        IS NOT NULL
+         GROUP BY app
+         ORDER BY total_time_ms DESC
+         LIMIT 30`
+      ).all();
+      return jsonResponse({ results: result.results });
+    }
+
+    if (url.pathname === "/admin/sessions" && request.method === "GET") {
+      const allEvents = await env.DB.prepare(
+        `SELECT
+           daily_id,
+           timestamp,
+           lower(trim(json_extract(data, '$.event')))    AS event,
+           lower(trim(json_extract(data, '$.app')))      AS app,
+           json_extract(data, '$.durationMs')            AS duration_ms
+         FROM analytics
+         ORDER BY daily_id, timestamp ASC`
+      ).all();
+
+      const userEvents = {};
+      for (const row of allEvents.results) {
+        if (!userEvents[row.daily_id]) userEvents[row.daily_id] = [];
+        userEvents[row.daily_id].push(row);
+      }
+
+      const sessions = [];
+      const SESSION_GAP_MS = 30 * 60 * 1000;
+      const BOUNCE_DURATION_MS = 20 * 1000;
+
+      for (const [dailyId, events] of Object.entries(userEvents)) {
+        let sessionStart = null;
+        let sessionEvents = [];
+
+        for (const ev of events) {
+          const ts = new Date(ev.timestamp).getTime();
+          if (sessionStart === null) {
+            sessionStart = ts;
+            sessionEvents = [ev];
+          } else {
+            const prev = new Date(sessionEvents[sessionEvents.length - 1].timestamp).getTime();
+            if (ts - prev > SESSION_GAP_MS) {
+              sessions.push({ dailyId, events: sessionEvents, startMs: sessionStart, endMs: prev });
+              sessionStart = ts;
+              sessionEvents = [ev];
+            } else {
+              sessionEvents.push(ev);
+            }
+          }
+        }
+        if (sessionStart !== null && sessionEvents.length > 0) {
+          const endMs = new Date(sessionEvents[sessionEvents.length - 1].timestamp).getTime();
+          sessions.push({ dailyId, events: sessionEvents, startMs: sessionStart, endMs });
+        }
+      }
+
+      const userSessionCounts = {};
+      let totalDuration = 0;
+      let longest = 0;
+      let shortest = Infinity;
+      let bounceCount = 0;
+      let totalApps = 0;
+
+      for (const s of sessions) {
+        const dur = s.endMs - s.startMs;
+        const launchCount = s.events.filter((e) => e.event === "launch").length;
+        if (dur > longest) longest = dur;
+        if (dur < shortest) shortest = dur;
+        totalDuration += dur;
+        totalApps += launchCount;
+        if (s.events.length <= 1 || dur < BOUNCE_DURATION_MS) bounceCount++;
+        if (!userSessionCounts[s.dailyId]) userSessionCounts[s.dailyId] = { days: {}, totalEvents: 0 };
+        const day = new Date(s.startMs).toISOString().slice(0, 10);
+        if (!userSessionCounts[s.dailyId].days[day]) userSessionCounts[s.dailyId].days[day] = 0;
+        userSessionCounts[s.dailyId].days[day] += s.events.length;
+      }
+
+      const powerUsers = Object.values(userSessionCounts).filter((u) =>
+        Object.values(u.days).some((count) => count >= 20)
+      ).length;
+
+      const count = sessions.length;
+      const avgDuration = count > 0 ? Math.round(totalDuration / count) : 0;
+      const avgApps = count > 0 ? Math.round((totalApps / count) * 10) / 10 : 0;
+
+      return jsonResponse({
+        total_sessions: count,
+        avg_duration_ms: avgDuration,
+        avg_apps_per_session: avgApps,
+        longest_session_ms: count > 0 ? longest : 0,
+        shortest_session_ms: count > 0 && shortest !== Infinity ? shortest : 0,
+        bounce_sessions: bounceCount,
+        power_users: powerUsers
+      });
+    }
+
+    if (url.pathname === "/admin/flows" && request.method === "GET") {
+      const allEvents = await env.DB.prepare(
+        `SELECT
+           daily_id,
+           timestamp,
+           lower(trim(json_extract(data, '$.event'))) AS event,
+           lower(trim(json_extract(data, '$.app')))   AS app
+         FROM analytics
+         WHERE json_extract(data, '$.event') = 'launch'
+         ORDER BY daily_id, timestamp ASC`
+      ).all();
+
+      const userEvents = {};
+      for (const row of allEvents.results) {
+        if (!userEvents[row.daily_id]) userEvents[row.daily_id] = [];
+        userEvents[row.daily_id].push(row);
+      }
+
+      const SESSION_GAP_MS = 30 * 60 * 1000;
+      const flowMap = {};
+
+      for (const events of Object.values(userEvents)) {
+        let sessionEvents = [];
+        for (const ev of events) {
+          const ts = new Date(ev.timestamp).getTime();
+          if (sessionEvents.length === 0) {
+            sessionEvents = [ev];
+          } else {
+            const prevTs = new Date(sessionEvents[sessionEvents.length - 1].timestamp).getTime();
+            if (ts - prevTs > SESSION_GAP_MS) {
+              sessionEvents = [ev];
+            } else {
+              const src = sessionEvents[sessionEvents.length - 1].app;
+              const dst = ev.app;
+              if (src && dst && src !== dst) {
+                const key = `${src}|||${dst}`;
+                flowMap[key] = (flowMap[key] || 0) + 1;
+              }
+              sessionEvents.push(ev);
+            }
+          }
+        }
+      }
+
+      const flows = Object.entries(flowMap)
+        .map(([key, count]) => {
+          const [src, dst] = key.split("|||");
+          return { source: src, destination: dst, count };
+        })
+        .sort((a, b) => b.count - a.count);
+
+      return jsonResponse({ flows });
+    }
+
+    if (url.pathname === "/admin/entry-exit" && request.method === "GET") {
+      const allEvents = await env.DB.prepare(
+        `SELECT
+           daily_id,
+           timestamp,
+           lower(trim(json_extract(data, '$.app'))) AS app
+         FROM analytics
+         WHERE json_extract(data, '$.event') = 'launch'
+         ORDER BY daily_id, timestamp ASC`
+      ).all();
+
+      const userEvents = {};
+      for (const row of allEvents.results) {
+        if (!userEvents[row.daily_id]) userEvents[row.daily_id] = [];
+        userEvents[row.daily_id].push(row);
+      }
+
+      const SESSION_GAP_MS = 30 * 60 * 1000;
+      const entryMap = {};
+      const exitMap = {};
+
+      for (const events of Object.values(userEvents)) {
+        let sessionEvents = [];
+        for (const ev of events) {
+          const ts = new Date(ev.timestamp).getTime();
+          if (sessionEvents.length === 0) {
+            sessionEvents = [ev];
+          } else {
+            const prevTs = new Date(sessionEvents[sessionEvents.length - 1].timestamp).getTime();
+            if (ts - prevTs > SESSION_GAP_MS) {
+              const exitApp = sessionEvents[sessionEvents.length - 1].app;
+              if (exitApp) exitMap[exitApp] = (exitMap[exitApp] || 0) + 1;
+              entryMap[ev.app] = (entryMap[ev.app] || 0) + 1;
+              sessionEvents = [ev];
+            } else {
+              sessionEvents.push(ev);
+            }
+          }
+        }
+        if (sessionEvents.length > 0) {
+          const entryApp = sessionEvents[0].app;
+          const exitApp = sessionEvents[sessionEvents.length - 1].app;
+          if (entryApp) entryMap[entryApp] = (entryMap[entryApp] || 0) + 1;
+          if (exitApp) exitMap[exitApp] = (exitMap[exitApp] || 0) + 1;
+        }
+      }
+
+      const toSorted = (map) =>
+        Object.entries(map)
+          .map(([app, count]) => ({ app, count }))
+          .sort((a, b) => b.count - a.count);
+
+      return jsonResponse({
+        top_entry_apps: toSorted(entryMap).slice(0, 10),
+        top_exit_apps: toSorted(exitMap).slice(0, 10)
+      });
+    }
+
+    if (url.pathname === "/admin/exploration" && request.method === "GET") {
+      const allEvents = await env.DB.prepare(
+        `SELECT
+           daily_id,
+           timestamp,
+           lower(trim(json_extract(data, '$.app'))) AS app
+         FROM analytics
+         WHERE json_extract(data, '$.event') = 'launch'
+         ORDER BY daily_id, timestamp ASC`
+      ).all();
+
+      const userEvents = {};
+      for (const row of allEvents.results) {
+        if (!userEvents[row.daily_id]) userEvents[row.daily_id] = [];
+        userEvents[row.daily_id].push(row);
+      }
+
+      const SESSION_GAP_MS = 30 * 60 * 1000;
+      const sessions = [];
+
+      for (const [dailyId, events] of Object.entries(userEvents)) {
+        let sessionEvents = [];
+        let sessionStart = null;
+        for (const ev of events) {
+          const ts = new Date(ev.timestamp).getTime();
+          if (sessionStart === null) {
+            sessionStart = ts;
+            sessionEvents = [ev];
+          } else {
+            const prevTs = new Date(sessionEvents[sessionEvents.length - 1].timestamp).getTime();
+            if (ts - prevTs > SESSION_GAP_MS) {
+              sessions.push({ dailyId, events: sessionEvents });
+              sessionStart = ts;
+              sessionEvents = [ev];
+            } else {
+              sessionEvents.push(ev);
+            }
+          }
+        }
+        if (sessionStart !== null) {
+          sessions.push({ dailyId, events: sessionEvents });
+        }
+      }
+
+      const sessionDiversity = sessions.map((s) => {
+        const unique = new Set(s.events.map((e) => e.app)).size;
+        return { dailyId: s.dailyId, unique_apps: unique, event_count: s.events.length };
+      });
+
+      const avgUnique =
+        sessionDiversity.length > 0
+          ? Math.round((sessionDiversity.reduce((a, b) => a + b.unique_apps, 0) / sessionDiversity.length) * 10) / 10
+          : 0;
+
+      const userExploration = {};
+      for (const s of sessionDiversity) {
+        if (!userExploration[s.dailyId]) userExploration[s.dailyId] = { total: 0, sessions: 0 };
+        userExploration[s.dailyId].total += s.unique_apps;
+        userExploration[s.dailyId].sessions += 1;
+      }
+
+      const topExplorers = Object.entries(userExploration)
+        .map(([id, v]) => ({
+          user_id: id.slice(0, 8) + "...",
+          avg_unique: Math.round((v.total / v.sessions) * 10) / 10
+        }))
+        .sort((a, b) => b.avg_unique - a.avg_unique)
+        .slice(0, 5);
+
+      const topDiverseSessions = sessionDiversity
+        .sort((a, b) => b.unique_apps - a.unique_apps)
+        .slice(0, 5)
+        .map((s) => ({ user_id: s.dailyId.slice(0, 8) + "...", unique_apps: s.unique_apps }));
+
+      return jsonResponse({
+        avg_unique_apps_per_session: avgUnique,
+        top_explorers: topExplorers,
+        top_diverse_sessions: topDiverseSessions
+      });
+    }
+
+    if (url.pathname === "/admin/live" && request.method === "GET") {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+      const activeUsers = await env.DB.prepare(
+        `SELECT COUNT(DISTINCT daily_id) AS count
+         FROM analytics
+         WHERE timestamp >= ?`
+      )
+        .bind(fiveMinAgo)
+        .all();
+
+      const topActive = await env.DB.prepare(
+        `SELECT
+           lower(trim(json_extract(data, '$.app'))) AS app,
+           COUNT(*)                                  AS count
+         FROM analytics
+         WHERE timestamp >= ?
+           AND json_extract(data, '$.event') = 'launch'
+         GROUP BY app
+         ORDER BY count DESC
+         LIMIT 5`
+      )
+        .bind(fiveMinAgo)
+        .all();
+
+      const recentSessions = await env.DB.prepare(
+        `SELECT daily_id, MIN(timestamp) AS first, MAX(timestamp) AS last
+         FROM analytics
+         WHERE timestamp >= ?
+         GROUP BY daily_id`
+      )
+        .bind(fiveMinAgo)
+        .all();
+
+      const SESSION_GAP_MS = 30 * 60 * 1000;
+      let activeSessions = 0;
+      for (const row of recentSessions.results) {
+        const diff = new Date(row.last).getTime() - new Date(row.first).getTime();
+        if (diff < SESSION_GAP_MS) activeSessions++;
+      }
+
+      return jsonResponse({
+        active_users_5min: activeUsers.results[0]?.count || 0,
+        active_sessions: activeSessions,
+        top_active_apps: topActive.results
+      });
+    }
+
+    return new Response("Not Found", { status: 404, headers: corsHeaders("text/plain") });
+  }
+};
+
+function corsHeaders(type) {
+  const base = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "*"
+  };
+  if (type === "text/html") return { ...base, "Content-Type": "text/html" };
+  if (type === "text/plain") return { ...base, "Content-Type": "text/plain" };
+  return { ...base, "Content-Type": "application/json" };
+}
+
+function fmtMs(ms) {
+  if (!ms || ms <= 0) return "0s";
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return h + "h " + (m % 60) + "m";
+  if (m > 0) return m + "m " + (s % 60) + "s";
+  return s + "s";
+}
+
+function adminHTML() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YukiOS Analytics</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07070d;
+  --surface:#0e0e1a;
+  --surface2:#13131f;
+  --border:#1c1c2e;
+  --border2:#25253a;
+  --accent:#7c3aed;
+  --accent2:#a855f7;
+  --accent3:#c084fc;
+  --green:#22c55e;
+  --red:#ef4444;
+  --yellow:#f59e0b;
+  --text:#e2e8f0;
+  --muted:#64748b;
+  --muted2:#94a3b8;
+}
+body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+
+.app-shell{display:flex;min-height:100vh}
+
+.sidebar{width:220px;min-height:100vh;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:100}
+.sidebar-logo{padding:24px 20px 18px;border-bottom:1px solid var(--border)}
+.sidebar-logo .logo-text{font-size:18px;font-weight:800;background:linear-gradient(135deg,#a855f7,#6d28d9);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:.5px}
+.sidebar-logo .logo-sub{font-size:10px;color:var(--muted);margin-top:3px;letter-spacing:.5px;text-transform:uppercase}
+.sidebar-nav{flex:1;padding:16px 0}
+.nav-section-label{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:12px 20px 6px;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:12px;padding:10px 20px;font-size:13px;color:var(--muted2);cursor:pointer;transition:all .15s;border-left:2px solid transparent;user-select:none}
+.nav-item i{width:16px;text-align:center;font-size:14px}
+.nav-item:hover{color:var(--text);background:var(--surface2)}
+.nav-item.active{color:var(--accent3);background:rgba(124,58,237,.08);border-left-color:var(--accent)}
+.sidebar-footer{padding:16px 20px;border-top:1px solid var(--border)}
+.live-badge{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--green);font-weight:600}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,197,94,.4)}50%{opacity:.7;box-shadow:0 0 0 6px rgba(34,197,94,0)}}
+
+.main{margin-left:220px;flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 28px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:50}
+.topbar-left{display:flex;align-items:center;gap:14px}
+.topbar-title{font-size:18px;font-weight:700;color:var(--text)}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.auth-input{padding:8px 14px;border-radius:8px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:13px;width:200px;outline:none}
+.auth-input:focus{border-color:var(--accent)}
+.range-select{padding:8px 12px;border-radius:8px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:13px;outline:none;cursor:pointer}
+.btn-load{padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:opacity .15s;display:flex;align-items:center;gap:8px}
+.btn-load:hover{opacity:.85}
+.last-refresh{font-size:11px;color:var(--muted);margin-left:4px}
+
+.content{padding:28px;flex:1}
+.panel{display:none}
+.panel.active{display:block}
+
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin-bottom:28px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px;position:relative;overflow:hidden;transition:border-color .2s,transform .15s}
+.kpi:hover{border-color:var(--border2);transform:translateY(-1px)}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.kpi-icon{width:36px;height:36px;border-radius:10px;background:rgba(124,58,237,.12);display:flex;align-items:center;justify-content:center;color:var(--accent2);font-size:16px;margin-bottom:12px}
+.kpi-val{font-size:28px;font-weight:800;color:var(--text);line-height:1}
+.kpi-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:6px;font-weight:600}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:4px}
+
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.section-title{font-size:15px;font-weight:700;color:var(--accent3);display:flex;align-items:center;gap:10px}
+.section-title i{font-size:16px;color:var(--accent)}
+
+.sort-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sort-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:var(--surface2);color:var(--muted2);font-size:11px;cursor:pointer;transition:all .15s;font-weight:600;display:flex;align-items:center;gap:5px}
+.sort-btn:hover{border-color:var(--accent);color:var(--accent3)}
+.sort-btn.active{background:rgba(124,58,237,.15);border-color:var(--accent);color:var(--accent3)}
+.filter-input{padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:11px;outline:none;width:160px}
+.filter-input:focus{border-color:var(--accent)}
+
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px}
+@media(max-width:800px){.chart-grid{grid-template-columns:1fr}}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+.chart-card-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.chart-card-title i{color:var(--accent)}
+
+.canvas-wrap{height:160px;position:relative}
+canvas{width:100%!important;height:100%!important}
+
+.days-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.day-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:border-color .2s}
+.day-card:hover{border-color:var(--border2)}
+.day-card-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;user-select:none}
+.day-card-date{font-size:14px;font-weight:700;color:var(--text)}
+.day-card-quick{display:flex;gap:16px}
+.day-card-quick-stat{text-align:center}
+.day-card-quick-stat .qv{font-size:16px;font-weight:700;color:var(--accent3)}
+.day-card-quick-stat .ql{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.day-expand-icon{color:var(--muted);font-size:12px;transition:transform .2s}
+.day-card.open .day-expand-icon{transform:rotate(180deg)}
+.day-card-body{display:none;padding:0 16px 16px;border-top:1px solid var(--border)}
+.day-card.open .day-card-body{display:block}
+.day-stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 0}
+.day-stat-box{background:var(--surface2);border-radius:8px;padding:10px;text-align:center}
+.day-stat-box .dsv{font-size:18px;font-weight:700;color:var(--text)}
+.day-stat-box .dsl{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:3px}
+.games-section-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600;margin-bottom:8px;margin-top:4px}
+.game-item{display:flex;align-items:center;gap:10px;margin-top:6px}
+.game-rank{font-size:10px;font-weight:700;color:var(--muted);width:16px;text-align:right}
+.game-name{font-size:12px;color:var(--text);font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.game-count{font-size:11px;color:var(--muted2);min-width:28px;text-align:right;font-weight:700}
+.game-bar-wrap{width:80px;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.game-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .3s}
+
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px;transition:border-color .2s,transform .15s}
+.stat-card:hover{border-color:var(--border2);transform:translateY(-1px)}
+.stat-card .sc-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600;margin-bottom:8px}
+.stat-card .sc-val{font-size:26px;font-weight:800;color:var(--accent3);line-height:1}
+.stat-card .sc-sub{font-size:11px;color:var(--muted);margin-top:5px}
+
+.time-list{display:flex;flex-direction:column;gap:10px}
+.time-item{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:14px;transition:border-color .2s}
+.time-item:hover{border-color:var(--border2)}
+.time-rank-badge{width:32px;height:32px;border-radius:8px;background:rgba(124,58,237,.12);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:var(--accent2);flex-shrink:0}
+.time-info{flex:1;min-width:0}
+.time-app{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time-bar-track{height:4px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden}
+.time-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .4s}
+.time-stats{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0}
+.time-duration{font-size:14px;font-weight:700;color:var(--text)}
+.time-sessions{font-size:10px;color:var(--muted)}
+
+.flow-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.flow-table{width:100%;border-collapse:collapse;font-size:13px}
+.flow-table th{padding:11px 16px;color:var(--muted);font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.5px;background:var(--surface2);text-align:left;border-bottom:1px solid var(--border)}
+.flow-table td{padding:11px 16px;border-bottom:1px solid var(--border);vertical-align:middle}
+.flow-table tr:last-child td{border-bottom:none}
+.flow-table tr:hover td{background:var(--surface2)}
+.flow-from{color:var(--accent2);font-weight:700}
+.flow-to{color:var(--accent3)}
+.flow-arrow{color:var(--muted);font-size:11px;padding:0 4px}
+.flow-bar-cell{display:flex;align-items:center;gap:8px}
+.flow-count{font-weight:700;color:var(--text);min-width:32px}
+.flow-bar{height:6px;background:var(--border);border-radius:3px;flex:1;overflow:hidden;max-width:120px}
+.flow-bar-inner{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:3px}
+
+.entry-exit-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:700px){.entry-exit-grid{grid-template-columns:1fr}}
+.entry-exit-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+.entry-exit-card-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.entry-exit-card-title.entry{color:var(--green)}
+.entry-exit-card-title.exit{color:var(--red)}
+.ee-item{display:flex;align-items:center;gap:10px;margin-top:10px}
+.ee-name{font-size:12px;color:var(--text);font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ee-count{font-size:11px;color:var(--muted2);font-weight:700;min-width:28px;text-align:right}
+.ee-bar-wrap{width:72px;height:4px;background:var(--border);border-radius:2px;overflow:hidden}
+.ee-bar-entry{height:100%;background:var(--green);border-radius:2px}
+.ee-bar-exit{height:100%;background:var(--red);border-radius:2px}
+
+.explore-grid{display:grid;grid-template-columns:1fr 2fr 2fr;gap:14px}
+@media(max-width:900px){.explore-grid{grid-template-columns:1fr}}
+.explore-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px}
+.explore-card-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:12px}
+.explore-big{font-size:40px;font-weight:800;color:var(--accent3)}
+.explore-sub{font-size:11px;color:var(--muted);margin-top:6px}
+.user-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px}
+.user-row:last-child{border-bottom:none}
+.user-id{color:var(--accent2);font-family:monospace;font-weight:600}
+.user-val{color:var(--text);font-weight:700}
+
+.live-strip{display:grid;grid-template-columns:auto auto 1fr;gap:24px;align-items:center;background:rgba(34,197,94,.04);border:1px solid rgba(34,197,94,.15);border-radius:14px;padding:16px 22px;margin-bottom:28px}
+.live-strip-stat .lsv{font-size:32px;font-weight:800;color:var(--text)}
+.live-strip-stat .lsl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600;margin-top:2px}
+.live-divider{width:1px;height:40px;background:var(--border)}
+.live-apps-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:6px;font-weight:600}
+.live-app-chips{display:flex;flex-wrap:wrap;gap:6px}
+.live-chip{padding:4px 10px;border-radius:20px;background:rgba(124,58,237,.12);border:1px solid rgba(124,58,237,.2);font-size:11px;color:var(--accent3);font-weight:600}
+
+.empty-state{padding:40px;text-align:center;color:var(--muted);font-size:13px}
+.empty-state i{font-size:28px;margin-bottom:10px;display:block;opacity:.4}
+.error-msg{color:var(--red);font-size:13px;padding:12px}
+
+@media(max-width:768px){
+  .sidebar{transform:translateX(-100%)}
+  .main{margin-left:0}
+  .kpi-row{grid-template-columns:1fr 1fr}
+  .day-stats-row{grid-template-columns:1fr 1fr}
+  .explore-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-text">YukiOS</div>
+      <div class="logo-sub">Analytics Dashboard</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Overview</div>
+      <div class="nav-item active" data-panel="dashboard" onclick="switchPanel('dashboard',this)">
+        <i class="fa-solid fa-gauge-high"></i>Dashboard
+      </div>
+      <div class="nav-item" data-panel="daily" onclick="switchPanel('daily',this)">
+        <i class="fa-solid fa-calendar-days"></i>Daily Stats
+      </div>
+      <div class="nav-section-label">Deep Dive</div>
+      <div class="nav-item" data-panel="playtime" onclick="switchPanel('playtime',this)">
+        <i class="fa-solid fa-clock"></i>Play Time
+      </div>
+      <div class="nav-item" data-panel="sessions" onclick="switchPanel('sessions',this)">
+        <i class="fa-solid fa-layer-group"></i>Sessions
+      </div>
+      <div class="nav-item" data-panel="flows" onclick="switchPanel('flows',this)">
+        <i class="fa-solid fa-route"></i>Flows
+      </div>
+      <div class="nav-section-label">Behavior</div>
+      <div class="nav-item" data-panel="entryexit" onclick="switchPanel('entryexit',this)">
+        <i class="fa-solid fa-door-open"></i>Entry / Exit
+      </div>
+      <div class="nav-item" data-panel="exploration" onclick="switchPanel('exploration',this)">
+        <i class="fa-solid fa-compass"></i>Exploration
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="live-badge"><span class="live-dot"></span>Live monitoring</div>
+      <div id="lastRefresh" style="font-size:10px;color:var(--muted);margin-top:6px"></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title" id="panelTitle">Dashboard</div>
+      </div>
+      <div class="topbar-right">
+        <input class="auth-input" id="token" type="password" placeholder="Auth token...">
+        <select class="range-select" id="range">
+          <option value="7d">7 days</option>
+          <option value="30d" selected>30 days</option>
+          <option value="90d">90 days</option>
+          <option value="1y">1 year</option>
+        </select>
+        <button class="btn-load" onclick="loadAll()"><i class="fa-solid fa-bolt"></i>Load</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <div id="panel-dashboard" class="panel active">
+        <div id="liveStrip" style="display:none">
+          <div class="live-strip">
+            <div class="live-strip-stat">
+              <div class="lsv" id="liveUsers">—</div>
+              <div class="lsl"><i class="fa-solid fa-users" style="margin-right:4px"></i>Active Users</div>
+            </div>
+            <div class="live-divider"></div>
+            <div class="live-strip-stat">
+              <div class="lsv" id="liveSessions">—</div>
+              <div class="lsl"><i class="fa-solid fa-layer-group" style="margin-right:4px"></i>Active Sessions</div>
+            </div>
+            <div>
+              <div class="live-apps-label"><i class="fa-solid fa-fire" style="margin-right:4px"></i>Trending Now</div>
+              <div class="live-app-chips" id="liveApps"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="kpi-row" id="kpiRow">
+          <div class="kpi">
+            <div class="kpi-icon"><i class="fa-solid fa-arrow-trend-up"></i></div>
+            <div class="kpi-val" id="kTotal">—</div>
+            <div class="kpi-label">Total Requests</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-icon"><i class="fa-solid fa-users"></i></div>
+            <div class="kpi-val" id="kUsers">—</div>
+            <div class="kpi-label">Unique Users</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-icon"><i class="fa-solid fa-layer-group"></i></div>
+            <div class="kpi-val" id="kSessions">—</div>
+            <div class="kpi-label">Total Sessions</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-icon"><i class="fa-solid fa-clock"></i></div>
+            <div class="kpi-val" id="kAvgDur">—</div>
+            <div class="kpi-label">Avg Session</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-icon"><i class="fa-solid fa-bolt"></i></div>
+            <div class="kpi-val" id="kPower">—</div>
+            <div class="kpi-label">Power Users</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-icon"><i class="fa-solid fa-person-running"></i></div>
+            <div class="kpi-val" id="kBounce">—</div>
+            <div class="kpi-label">Bounce Sessions</div>
+          </div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="chart-card">
+            <div class="chart-card-title"><i class="fa-solid fa-chart-bar"></i>Requests / Day</div>
+            <div class="canvas-wrap"><canvas id="chartReq"></canvas></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title"><i class="fa-solid fa-chart-line"></i>Sessions / Day</div>
+            <div class="canvas-wrap"><canvas id="chartSess"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="panel-daily" class="panel">
+        <div class="section-header">
+          <div class="section-title"><i class="fa-solid fa-calendar-days"></i>Daily Breakdown</div>
+          <div class="sort-bar">
+            <span style="font-size:11px;color:var(--muted);font-weight:600">Sort:</span>
+            <button class="sort-btn active" id="sortDate" onclick="sortDays('date')"><i class="fa-solid fa-calendar"></i>Date</button>
+            <button class="sort-btn" id="sortReq" onclick="sortDays('requests')"><i class="fa-solid fa-arrow-up"></i>Requests</button>
+            <button class="sort-btn" id="sortUsers" onclick="sortDays('users')"><i class="fa-solid fa-users"></i>Users</button>
+            <input class="filter-input" id="dayFilter" placeholder="Filter by date..." oninput="filterDays()">
+          </div>
+        </div>
+        <div class="days-grid" id="daysGrid"><div class="empty-state"><i class="fa-solid fa-calendar-xmark"></i>Load data to see daily stats.</div></div>
+      </div>
+
+      <div id="panel-playtime" class="panel">
+        <div class="section-header">
+          <div class="section-title"><i class="fa-solid fa-clock"></i>Play Time Rankings</div>
+          <div class="sort-bar">
+            <input class="filter-input" id="timeFilter" placeholder="Filter app..." oninput="filterTime()">
+          </div>
+        </div>
+        <div class="time-list" id="timeList"><div class="empty-state"><i class="fa-solid fa-clock"></i>Load data to see play time.</div></div>
+      </div>
+
+      <div id="panel-sessions" class="panel">
+        <div class="section-header">
+          <div class="section-title"><i class="fa-solid fa-layer-group"></i>Session Analytics</div>
+        </div>
+        <div class="cards-grid" id="sessionsGrid"><div class="empty-state"><i class="fa-solid fa-layer-group"></i>Load data to see session stats.</div></div>
+      </div>
+
+      <div id="panel-flows" class="panel">
+        <div class="section-header">
+          <div class="section-title"><i class="fa-solid fa-route"></i>Navigation Flows</div>
+          <div class="sort-bar">
+            <input class="filter-input" id="flowFilter" placeholder="Filter app..." oninput="filterFlows()">
+          </div>
+        </div>
+        <div class="flow-wrap"><table class="flow-table">
+          <thead><tr><th>From</th><th></th><th>To</th><th>Volume</th></tr></thead>
+          <tbody id="flowBody"><tr><td colspan="4" class="empty-state">Load data to see flows.</td></tr></tbody>
+        </table></div>
+      </div>
+
+      <div id="panel-entryexit" class="panel">
+        <div class="section-header">
+          <div class="section-title"><i class="fa-solid fa-door-open"></i>Entry &amp; Exit Apps</div>
+        </div>
+        <div class="entry-exit-grid" id="entryExitGrid"><div class="empty-state"><i class="fa-solid fa-door-open"></i>Load data to see entry/exit data.</div></div>
+      </div>
+
+      <div id="panel-exploration" class="panel">
+        <div class="section-header">
+          <div class="section-title"><i class="fa-solid fa-compass"></i>Exploration Stats</div>
+        </div>
+        <div class="explore-grid" id="exploreGrid"><div class="empty-state"><i class="fa-solid fa-compass"></i>Load data to see exploration stats.</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+var token="";
+var refreshTimer=null;
+var _statsData=null;
+var _sessionsData=null;
+var _timeData=null;
+var _flowsData=null;
+var _eeData=null;
+var _exploreData=null;
+var _daySort="date";
+var _chartReq=null;
+var _chartSess=null;
+
+var panelTitles={
+  dashboard:"Dashboard",
+  daily:"Daily Stats",
+  playtime:"Play Time",
+  sessions:"Session Analytics",
+  flows:"Navigation Flows",
+  entryexit:"Entry / Exit Apps",
+  exploration:"Exploration Stats"
+};
+
+function switchPanel(id,el){
+  document.querySelectorAll(".panel").forEach(function(p){p.classList.remove("active");});
+  document.querySelectorAll(".nav-item").forEach(function(n){n.classList.remove("active");});
+  document.getElementById("panel-"+id).classList.add("active");
+  el.classList.add("active");
+  document.getElementById("panelTitle").textContent=panelTitles[id]||id;
+}
+
+function getHeaders(){return{"Authorization":"Bearer "+token};}
+
+function fmtMs(ms){
+  if(!ms||ms<=0)return"0s";
+  var s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60);
+  if(h>0)return h+"h "+(m%60)+"m";
+  if(m>0)return m+"m "+(s%60)+"s";
+  return s+"s";
+}
+
+function displayApp(name){
+  if(!name)return"Unknown";
+  var s=name.trim();
+  if(s.toLowerCase().endsWith("app")){
+    s=s.slice(0,-3).trim();
+    s=s.replace(/([a-z])([A-Z])/g,"$1 $2");
+    s=s.charAt(0).toUpperCase()+s.slice(1);
+    return s+" App";
+  }
+  s=s.replace(/([a-z])([A-Z])/g,"$1 $2");
+  return s.charAt(0).toUpperCase()+s.slice(1);
+}
+
+function loadAll(){
+  token=document.getElementById("token").value.trim();
+  if(!token){alert("Enter auth token first");return;}
+  loadStats();loadTopTime();loadSessions();loadFlows();loadEntryExit();loadExploration();loadLive();
+  document.getElementById("lastRefresh").textContent="Loaded "+new Date().toLocaleTimeString();
+  if(refreshTimer)clearInterval(refreshTimer);
+  refreshTimer=setInterval(function(){
+    loadStats();loadTopTime();loadSessions();loadFlows();loadEntryExit();loadExploration();loadLive();
+    document.getElementById("lastRefresh").textContent="Loaded "+new Date().toLocaleTimeString();
+  },60000);
+}
+
+function loadStats(){
+  var range=document.getElementById("range").value;
+  fetch("/admin/stats?range="+range,{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(function(d){_statsData=d;renderDashboardCharts(d);renderDays(d);});
+}
+
+function loadTopTime(){
+  fetch("/admin/top-played-time-games",{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(function(d){_timeData=d;renderTime(d);});
+}
+
+function loadSessions(){
+  fetch("/admin/sessions",{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(function(d){_sessionsData=d;renderSessions(d);updateKpiSessions(d);});
+}
+
+function loadFlows(){
+  fetch("/admin/flows",{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(function(d){_flowsData=d;renderFlows(d);});
+}
+
+function loadEntryExit(){
+  fetch("/admin/entry-exit",{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(function(d){_eeData=d;renderEntryExit(d);});
+}
+
+function loadExploration(){
+  fetch("/admin/exploration",{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(function(d){_exploreData=d;renderExploration(d);});
+}
+
+function loadLive(){
+  fetch("/admin/live",{headers:getHeaders()})
+    .then(function(r){return r.json();})
+    .then(renderLive)
+    .catch(function(){});
+}
+
+function renderLive(data){
+  document.getElementById("liveStrip").style.display="block";
+  document.getElementById("liveUsers").textContent=data.active_users_5min||0;
+  document.getElementById("liveSessions").textContent=data.active_sessions||0;
+  var chips=document.getElementById("liveApps");
+  chips.innerHTML="";
+  (data.top_active_apps||[]).forEach(function(a){
+    var c=document.createElement("span");
+    c.className="live-chip";
+    c.textContent=displayApp(a.app)+" · "+a.count;
+    chips.appendChild(c);
+  });
+  if(!chips.children.length)chips.innerHTML='<span style="color:var(--muted);font-size:11px">No active apps</span>';
+}
+
+function updateKpiSessions(d){
+  document.getElementById("kSessions").textContent=(d.total_sessions||0).toLocaleString();
+  document.getElementById("kAvgDur").textContent=fmtMs(d.avg_duration_ms);
+  document.getElementById("kPower").textContent=(d.power_users||0).toLocaleString();
+  document.getElementById("kBounce").textContent=(d.bounce_sessions||0).toLocaleString();
+}
+
+function renderDashboardCharts(data){
+  if(!data.daily||!data.daily.length)return;
+  var reversed=[].concat(data.daily).reverse();
+  var labels=reversed.map(function(d){return d.day.slice(5);});
+  var reqVals=reversed.map(function(d){return d.requests;});
+  var sessVals=reversed.map(function(d){return d.inferred_sessions||0;});
+
+  var totalReq=data.daily.reduce(function(s,d){return s+d.requests;},0);
+  var totalUsers=new Set(data.daily.map(function(d){return d.unique_players;})).size;
+  document.getElementById("kTotal").textContent=totalReq.toLocaleString();
+  document.getElementById("kUsers").textContent=data.daily.reduce(function(s,d){return s+(d.unique_players||0);},0).toLocaleString();
+
+  var cfg={type:"bar",options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){return" "+ctx.parsed.y.toLocaleString();}}}},scales:{x:{grid:{color:"rgba(255,255,255,.04)"},ticks:{color:"#64748b",font:{size:9}}},y:{grid:{color:"rgba(255,255,255,.04)"},ticks:{color:"#64748b",font:{size:9}}}}}};
+
+  if(_chartReq){_chartReq.destroy();}
+  var ctx1=document.getElementById("chartReq").getContext("2d");
+  var grad1=ctx1.createLinearGradient(0,0,0,160);
+  grad1.addColorStop(0,"rgba(124,58,237,.9)");
+  grad1.addColorStop(1,"rgba(124,58,237,.2)");
+  _chartReq=new Chart(ctx1,Object.assign({},cfg,{data:{labels:labels,datasets:[{data:reqVals,backgroundColor:grad1,borderRadius:4,borderSkipped:false}]}}));
+
+  if(_chartSess){_chartSess.destroy();}
+  var ctx2=document.getElementById("chartSess").getContext("2d");
+  var grad2=ctx2.createLinearGradient(0,0,0,160);
+  grad2.addColorStop(0,"rgba(168,85,247,.9)");
+  grad2.addColorStop(1,"rgba(168,85,247,.2)");
+  _chartSess=new Chart(ctx2,Object.assign({},cfg,{data:{labels:labels,datasets:[{data:sessVals,backgroundColor:grad2,borderRadius:4,borderSkipped:false}]}}));
+}
+
+function renderDays(data){
+  if(!data.daily||!data.daily.length){
+    document.getElementById("daysGrid").innerHTML='<div class="empty-state"><i class="fa-solid fa-calendar-xmark"></i>No daily data found.</div>';
+    return;
+  }
+  _daySort=_daySort||"date";
+  var days=[].concat(data.daily);
+  sortAndRenderDays(days,data.topGames);
+}
+
+var _lastDays=null,_lastGames=null;
+function sortAndRenderDays(days,games){
+  _lastDays=days||_lastDays;
+  _lastGames=games||_lastGames;
+  if(!_lastDays)return;
+  var filter=document.getElementById("dayFilter").value.toLowerCase().trim();
+  var sorted=[].concat(_lastDays).filter(function(d){return!filter||d.day.includes(filter);});
+  if(_daySort==="requests")sorted.sort(function(a,b){return b.requests-a.requests;});
+  else if(_daySort==="users")sorted.sort(function(a,b){return b.unique_players-a.unique_players;});
+  else sorted.sort(function(a,b){return b.day.localeCompare(a.day);});
+  var grid=document.getElementById("daysGrid");
+  grid.innerHTML="";
+  sorted.forEach(function(day){
+    var card=document.createElement("div");
+    card.className="day-card";
+    var list=(_lastGames&&_lastGames[day.day]||[]).slice(0,5);
+    var maxC=list.length?list[0].count:1;
+    var gamesHTML=list.length?list.map(function(g,i){
+      var pct=maxC>0?Math.round((g.count/maxC)*100):0;
+      return '<div class="game-item"><span class="game-rank">#'+(i+1)+'</span><span class="game-name">'+displayApp(g.app)+'</span><div class="game-bar-wrap"><div class="game-bar-fill" style="width:'+pct+'%"></div></div><span class="game-count">'+g.count+'</span></div>';
+    }).join(""):'<div style="font-size:11px;color:var(--muted);padding:6px 0">No launches</div>';
+    card.innerHTML=
+      '<div class="day-card-header" onclick="toggleDay(this)">'
+        +'<span class="day-card-date"><i class="fa-regular fa-calendar" style="margin-right:8px;color:var(--accent)"></i>'+day.day+'</span>'
+        +'<div class="day-card-quick">'
+          +'<div class="day-card-quick-stat"><div class="qv">'+day.requests+'</div><div class="ql">Req</div></div>'
+          +'<div class="day-card-quick-stat"><div class="qv">'+day.unique_players+'</div><div class="ql">Users</div></div>'
+          +'<div class="day-card-quick-stat"><div class="qv">'+(day.inferred_sessions||0)+'</div><div class="ql">Sess</div></div>'
+        +'</div>'
+        +'<i class="fa-solid fa-chevron-down day-expand-icon"></i>'
+      +'</div>'
+      +'<div class="day-card-body">'
+        +'<div class="day-stats-row">'
+          +'<div class="day-stat-box"><div class="dsv">'+day.requests+'</div><div class="dsl">Requests</div></div>'
+          +'<div class="day-stat-box"><div class="dsv">'+day.unique_players+'</div><div class="dsl">Unique Users</div></div>'
+          +'<div class="day-stat-box"><div class="dsv">'+(day.requests_per_user||0)+'</div><div class="dsl">Req / User</div></div>'
+          +'<div class="day-stat-box"><div class="dsv">'+(day.inferred_sessions||0)+'</div><div class="dsl">Sessions</div></div>'
+        +'</div>'
+        +'<div class="games-section-label"><i class="fa-solid fa-gamepad" style="margin-right:6px;color:var(--accent)"></i>Top Launches</div>'
+        +gamesHTML
+      +'</div>';
+    grid.appendChild(card);
+  });
+}
+
+function toggleDay(header){
+  var card=header.parentElement;
+  card.classList.toggle("open");
+}
+
+function sortDays(by){
+  _daySort=by;
+  document.querySelectorAll(".sort-btn").forEach(function(b){b.classList.remove("active");});
+  document.getElementById("sort"+by.charAt(0).toUpperCase()+by.slice(1)).classList.add("active");
+  if(_lastDays)sortAndRenderDays();
+}
+
+function filterDays(){
+  if(_lastDays)sortAndRenderDays();
+}
+
+function renderTime(data){
+  var results=(data.results||[]);
+  var list=document.getElementById("timeList");
+  var filter=document.getElementById("timeFilter")&&document.getElementById("timeFilter").value.toLowerCase()||"";
+  var filtered=filter?results.filter(function(r){return (r.app||"").toLowerCase().includes(filter);}):results;
+  if(!filtered.length){list.innerHTML='<div class="empty-state"><i class="fa-solid fa-clock"></i>No playtime data found.</div>';return;}
+  var max=filtered[0].total_time_ms||1;
+  list.innerHTML="";
+  filtered.forEach(function(r,i){
+    var pct=max>0?Math.round(((r.total_time_ms||0)/max)*100):0;
+    var item=document.createElement("div");
+    item.className="time-item";
+    item.innerHTML=
+      '<div class="time-rank-badge">'+(i+1)+'</div>'
+      +'<div class="time-info">'
+        +'<div class="time-app">'+displayApp(r.app)+'</div>'
+        +'<div class="time-bar-track"><div class="time-bar-fill" style="width:'+pct+'%"></div></div>'
+      +'</div>'
+      +'<div class="time-stats">'
+        +'<div class="time-duration">'+fmtMs(r.total_time_ms)+'</div>'
+        +'<div class="time-sessions"><i class="fa-solid fa-rotate" style="margin-right:3px"></i>'+(r.event_count||0)+' events</div>'
+      +'</div>';
+    list.appendChild(item);
+  });
+}
+
+function filterTime(){
+  if(_timeData)renderTime(_timeData);
+}
+
+function renderSessions(data){
+  var grid=document.getElementById("sessionsGrid");
+  var items=[
+    {icon:"fa-layer-group",label:"Total Sessions",val:(data.total_sessions||0).toLocaleString(),sub:"inferred from event gaps"},
+    {icon:"fa-stopwatch",label:"Avg Duration",val:fmtMs(data.avg_duration_ms),sub:"per session"},
+    {icon:"fa-gamepad",label:"Avg Apps / Session",val:data.avg_apps_per_session,sub:"launches per session"},
+    {icon:"fa-trophy",label:"Longest Session",val:fmtMs(data.longest_session_ms),sub:"single session"},
+    {icon:"fa-hourglass-start",label:"Shortest Session",val:fmtMs(data.shortest_session_ms),sub:"single session"},
+    {icon:"fa-person-running",label:"Bounce Sessions",val:(data.bounce_sessions||0).toLocaleString(),sub:"1 event or <20s"},
+    {icon:"fa-bolt",label:"Power Users",val:(data.power_users||0).toLocaleString(),sub:"20+ events in one day"}
+  ];
+  grid.innerHTML="";
+  items.forEach(function(item){
+    var c=document.createElement("div");
+    c.className="stat-card";
+    c.innerHTML='<div class="sc-label"><i class="fa-solid '+item.icon+'" style="margin-right:6px;color:var(--accent)"></i>'+item.label+'</div><div class="sc-val">'+item.val+'</div><div class="sc-sub">'+item.sub+'</div>';
+    grid.appendChild(c);
+  });
+}
+
+var _allFlows=[];
+function renderFlows(data){
+  _allFlows=data.flows||[];
+  buildFlowTable(_allFlows);
+}
+
+function buildFlowTable(flows){
+  var filter=(document.getElementById("flowFilter").value||"").toLowerCase();
+  var filtered=filter?flows.filter(function(f){return (f.source||"").includes(filter)||(f.destination||"").includes(filter);}):flows;
+  var tbody=document.getElementById("flowBody");
+  if(!filtered.length){tbody.innerHTML='<tr><td colspan="4" class="empty-state">No navigation flows found.</td></tr>';return;}
+  var maxC=filtered[0].count||1;
+  tbody.innerHTML="";
+  filtered.slice(0,30).forEach(function(f){
+    var pct=Math.round((f.count/maxC)*100);
+    var tr=document.createElement("tr");
+    tr.innerHTML=
+      '<td class="flow-from">'+displayApp(f.source)+'</td>'
+      +'<td class="flow-arrow"><i class="fa-solid fa-arrow-right"></i></td>'
+      +'<td class="flow-to">'+displayApp(f.destination)+'</td>'
+      +'<td><div class="flow-bar-cell"><span class="flow-count">'+f.count+'</span><div class="flow-bar"><div class="flow-bar-inner" style="width:'+pct+'%"></div></div></div></td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function filterFlows(){buildFlowTable(_allFlows);}
+
+function renderEntryExit(data){
+  var grid=document.getElementById("entryExitGrid");
+  grid.innerHTML="";
+  function makeCard(title,cls,items,barClass){
+    var card=document.createElement("div");
+    card.className="entry-exit-card";
+    var icon=cls==="entry"?'<i class="fa-solid fa-right-to-bracket"></i>':'<i class="fa-solid fa-right-from-bracket"></i>';
+    card.innerHTML='<div class="entry-exit-card-title '+cls+'">'+icon+' '+title+'</div>';
+    if(!items||!items.length){card.innerHTML+='<div class="empty-state" style="padding:16px">No data</div>';return card;}
+    var maxC=items[0].count||1;
+    items.forEach(function(item){
+      var pct=Math.round((item.count/maxC)*100);
+      var row=document.createElement("div");
+      row.className="ee-item";
+      row.innerHTML='<span class="ee-name">'+displayApp(item.app)+'</span><div class="ee-bar-wrap"><div class="'+barClass+'" style="width:'+pct+'%"></div></div><span class="ee-count">'+item.count+'</span>';
+      card.appendChild(row);
+    });
+    return card;
+  }
+  grid.appendChild(makeCard("Top Entry Apps","entry",data.top_entry_apps,"ee-bar-entry"));
+  grid.appendChild(makeCard("Top Exit Apps","exit",data.top_exit_apps,"ee-bar-exit"));
+}
+
+function renderExploration(data){
+  var grid=document.getElementById("exploreGrid");
+  grid.innerHTML="";
+  var avg=document.createElement("div");
+  avg.className="explore-card";
+  avg.innerHTML='<div class="explore-card-title"><i class="fa-solid fa-compass" style="margin-right:6px;color:var(--accent)"></i>Avg Unique Apps / Session</div><div class="explore-big">'+data.avg_unique_apps_per_session+'</div><div class="explore-sub">app diversity per session</div>';
+  grid.appendChild(avg);
+
+  var explorers=document.createElement("div");
+  explorers.className="explore-card";
+  explorers.innerHTML='<div class="explore-card-title"><i class="fa-solid fa-ranking-star" style="margin-right:6px;color:var(--accent)"></i>Most Exploratory Users</div>';
+  if(data.top_explorers&&data.top_explorers.length){
+    data.top_explorers.forEach(function(u){
+      explorers.innerHTML+='<div class="user-row"><span class="user-id">'+u.user_id+'</span><span class="user-val">'+u.avg_unique+' apps/sess</span></div>';
+    });
+  } else {explorers.innerHTML+='<div style="font-size:11px;color:var(--muted);margin-top:8px">No data</div>';}
+  grid.appendChild(explorers);
+
+  var diverse=document.createElement("div");
+  diverse.className="explore-card";
+  diverse.innerHTML='<div class="explore-card-title"><i class="fa-solid fa-shuffle" style="margin-right:6px;color:var(--accent)"></i>Most Diverse Sessions</div>';
+  if(data.top_diverse_sessions&&data.top_diverse_sessions.length){
+    data.top_diverse_sessions.forEach(function(s){
+      diverse.innerHTML+='<div class="user-row"><span class="user-id">'+s.user_id+'</span><span class="user-val">'+s.unique_apps+' unique apps</span></div>';
+    });
+  } else {diverse.innerHTML+='<div style="font-size:11px;color:var(--muted);margin-top:8px">No data</div>';}
+  grid.appendChild(diverse);
+}
+<\/script>
+</body>
+</html>`;
+}

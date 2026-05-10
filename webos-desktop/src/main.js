@@ -1,0 +1,191 @@
+import { TerminalApp } from "./terminal.js";
+import { ExplorerApp } from "./explorer.js";
+import { WindowManager } from "./windowManager.js";
+import { AppLauncher } from "./appLauncher.js";
+import { BrowserApp } from "./browserApp.js";
+import { NotepadApp } from "./notepad.js";
+import { CameraApp } from "./camera.js";
+import { AboutApp } from "./about.js";
+import { NewsApp } from "./news.js";
+import { SystemUtilities } from "./system.js";
+import { FileSystemManager } from "./fs.js";
+import { setupStartMenu } from "./startMenu.js";
+import { DesktopUI } from "./desktopui.js";
+import { CalculatorApp } from "./calculator.js";
+import { SettingsApp } from "./settings.js";
+import { TaskManagerApp } from "./taskManager.js";
+import { WeatherApp } from "./weather.js";
+import { detectOS, isMobile } from "./shared/platformUtils.js";
+import { AppCreatorApp } from "./appCreator.js";
+import { OfficeAppProxy } from "./officeLoader.js";
+import { MarkdownApp } from "./markdown.js";
+import { YouTubeApp } from "./youtube.js";
+import { MonacoApp } from "./monaco.js";
+import { Model3DApp } from "./model3d.js";
+import { NotificationCenter } from "./notificationCenter.js";
+import { CategoriesApp } from "./categories.js";
+import { MusicPlayerApp } from "./music.js";
+import { JsDosApp } from "./jsdos.js";
+import { V86App } from "./v86.js";
+import { AchievementsApp } from "./achievements.js";
+import { sendAppInstallAnalytics } from "./analytics.js";
+import { setDesktopUI as setGamesDesktopUI } from "./games.js";
+import { AdsManager } from "./ads.js";
+import { registerPWA } from "./pwa.js";
+
+function initDownloadButton() {
+  return;
+  if (isMobile()) return;
+  const installBtn = document.createElement("div");
+  installBtn.id = "install-app";
+  installBtn.textContent = "Install Desktop App";
+  document.body.appendChild(installBtn);
+  setTimeout(() => {
+    if (installBtn) installBtn.remove();
+  }, 3000);
+  installBtn.addEventListener("click", () => {
+    sendAppInstallAnalytics();
+    fetch("https://api.github.com/repos/Reeyuki/YukiOS/releases/latest")
+      .then((res) => res.json())
+      .then((release) => {
+        const files = release.assets.map((asset) => ({
+          name: asset.name,
+          url: asset.browser_download_url
+        }));
+        const osFiles = {
+          linux: files.filter((f) => f.name.includes("linux")),
+          mac: files.filter((f) => f.name.includes("mac")),
+          windows: files.filter((f) => f.name.includes("windows"))
+        };
+        function downloadFile(fileUrl) {
+          const a = document.createElement("a");
+          a.href = fileUrl;
+          a.download = "";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        function askLinuxPackage(files) {
+          const choice = prompt(
+            "Linux detected. Choose install type:\n1 = .deb (debian based)\n2 = .zip (portable)",
+            "1"
+          );
+          if (choice === "2") {
+            const zipFile = files.find((f) => f.name.endsWith(".zip"));
+            if (zipFile) downloadFile(zipFile.url);
+          } else {
+            const debFile = files.find((f) => f.name.endsWith(".deb"));
+            if (debFile) downloadFile(debFile.url);
+          }
+        }
+        const os = detectOS();
+        if (isMobile()) return;
+        const osSpecificFiles = osFiles[os];
+        if (!osSpecificFiles || osSpecificFiles.length === 0) return;
+        if (os === "linux") {
+          askLinuxPackage(osSpecificFiles);
+        } else {
+          downloadFile(osSpecificFiles[0].url);
+        }
+      });
+  });
+}
+
+if (!window.electronAPI) {
+  initDownloadButton();
+}
+
+registerPWA();
+const notificationCenter = new NotificationCenter();
+const fileSystemManager = new FileSystemManager();
+const windowManager = new WindowManager(notificationCenter);
+const achievementsApp = new AchievementsApp(windowManager);
+const notepadApp = new NotepadApp(fileSystemManager, windowManager, null);
+const markdownApp = new MarkdownApp(windowManager);
+const youtubeApp = new YouTubeApp(windowManager);
+const explorerApp = new ExplorerApp(fileSystemManager, windowManager, notepadApp, markdownApp);
+const officeApp = new OfficeAppProxy(fileSystemManager, windowManager);
+officeApp.setExplorer(explorerApp);
+explorerApp.setOfficeApp(officeApp);
+const calculatorApp = new CalculatorApp(windowManager);
+notepadApp.setExplorer(explorerApp);
+const browserApp = new BrowserApp(windowManager, fileSystemManager);
+youtubeApp.setBrowserApp(browserApp);
+const terminalApp = new TerminalApp(fileSystemManager, windowManager);
+const musicPlayer = new MusicPlayerApp();
+musicPlayer.setBrowserApp(browserApp);
+const jsDosApp = new JsDosApp(fileSystemManager, windowManager, explorerApp);
+explorerApp.setJsDos(jsDosApp);
+const v86app = new V86App(fileSystemManager, windowManager, explorerApp);
+explorerApp.setv86App(v86app);
+const cameraApp = new CameraApp(windowManager, fileSystemManager);
+const aboutApp = new AboutApp(windowManager);
+const newsApp = new NewsApp(windowManager);
+const settingsApp = new SettingsApp(windowManager);
+settingsApp.setFileSystemManager(fileSystemManager);
+const taskManagerApp = new TaskManagerApp(windowManager);
+const weatherApp = new WeatherApp(windowManager);
+const adsApp = new AdsManager(windowManager);
+explorerApp.setBrowser(browserApp);
+const appCreatorApp = new AppCreatorApp(fileSystemManager, windowManager);
+const monacoApp = new MonacoApp(fileSystemManager, windowManager, explorerApp);
+const categoriesApp = new CategoriesApp();
+
+const model3dApp = new Model3DApp(fileSystemManager, windowManager, explorerApp);
+const appLauncher = new AppLauncher(
+  windowManager,
+  fileSystemManager,
+  musicPlayer,
+  explorerApp,
+  terminalApp,
+  notepadApp,
+  browserApp,
+  cameraApp,
+  calculatorApp,
+  aboutApp,
+  newsApp,
+  settingsApp,
+  taskManagerApp,
+  weatherApp,
+  appCreatorApp,
+  officeApp,
+  monacoApp,
+  model3dApp,
+  categoriesApp,
+  jsDosApp,
+  v86app,
+  youtubeApp,
+  achievementsApp
+);
+appCreatorApp.setAppLauncher(appLauncher);
+explorerApp.setAppLauncher(appLauncher);
+const desktopUI = new DesktopUI(appLauncher, notepadApp, explorerApp, fileSystemManager);
+setGamesDesktopUI(desktopUI);
+explorerApp.setDesktopUI(desktopUI);
+settingsApp.setDesktopUI(desktopUI);
+settingsApp.setAppLauncher(appLauncher);
+appCreatorApp.setDesktopUI(desktopUI);
+appCreatorApp.restoreInstalledApps();
+SystemUtilities.startClock();
+SystemUtilities.setSettings(settingsApp);
+SystemUtilities.startTaskbarWeather(appLauncher);
+await SystemUtilities.loadWallpaper();
+
+const ads = new AdsManager(windowManager);
+
+const queryString = window.location.search;
+const urlParams = new URLSearchParams(queryString);
+const game = urlParams.get("game");
+const swf = urlParams.get("swf") === "true";
+const steamParam = urlParams.get("steam");
+
+if (steamParam) {
+  setTimeout(() => {
+    categoriesApp.initUrlParamHandling(appLauncher, windowManager);
+  }, 0);
+} else if (game) {
+  setTimeout(() => {
+    appLauncher.launch(game, swf);
+  }, 0);
+}
+setupStartMenu(appLauncher);
