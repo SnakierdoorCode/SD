@@ -1,13 +1,9 @@
-import { fetchHtmlAsBlobUrl, looksLikeHtml, isJsDelivrGhUrl } from "./shared/iframeUtils.js";
+import { desktop } from "./desktop.js";
 import { appMap } from "./gamesList.js";
-import {
-  initAnalytics,
-  getAnalyticsBase,
-  sendLaunchAnalytics,
-  sendAppInstallAnalytics,
-  recordUsage
-} from "./analytics.js";
-import { descriptionMap } from "./gameDescriptions.js";
+import { tryGetIcon } from "./startMenu";
+import { fetchHtmlAsBlobUrl, looksLikeHtml, isJsDelivrGhUrl, CDN_BASES } from "./shared/assetResolver.js";
+import { sendLaunchAnalytics } from "./analytics.js";
+import { PROXIES } from "./proxies.js";
 import { refreshIcons } from "./shared/contextMenu.js";
 
 let _launcher = null;
@@ -1203,8 +1199,8 @@ export class GameWindowRenderer {
     const hidden = SteamDataManager.getHidden();
     const visibleGames = allGames.filter((g) => !hidden.includes(g.app));
     const hiddenGames = allGames.filter((g) => hidden.includes(g.app));
-    const username = window._username || "Reeyuki";
-    const profilePic = "static/icons/guest.webp";
+    const username = localStorage.getItem("yukiOS_username") || "Reeyuki";
+    const profilePic = localStorage.getItem("yukiOS_profilePicture") || "static/icons/guest.webp";
 
     container.classList.add("steam-app-root");
     container.style.padding = "0";
@@ -1557,8 +1553,8 @@ export class GameWindowRenderer {
     win.classList.add("window-root");
     win.style.background = "#1b2838";
 
-    const username = window._username || "Reeyuki";
-    const profilePic = "static/icons/guest.webp";
+    const username = localStorage.getItem("yukiOS_username") || "Reeyuki";
+    const profilePic = localStorage.getItem("yukiOS_profilePicture") || "static/icons/guest.webp";
 
     win.innerHTML = `
       <div class="window-header" style="background: #171d25 !important; border-bottom: 1px solid rgba(255,255,255,0.1);">

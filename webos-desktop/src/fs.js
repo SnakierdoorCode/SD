@@ -1,8 +1,9 @@
 import BrowserFS from "browserfs";
+import { CDN_BASES, resolveWallpaperUrl } from "./shared/assetResolver.js";
 
 export const FileKind = { TEXT: "text", IMAGE: "image", VIDEO: "video", AUDIO: "audio", ROM: "rom", OTHER: "other" };
 
-const DEFAULT_JSDELIVR_GH_BASE = "https://cdn.jsdelivr.net/gh/reeyuki/yukios@main";
+const DEFAULT_JSDELIVR_GH_BASE = CDN_BASES.MAIN;
 const DEFAULT_WALLPAPER_STATIC_DIR = "/static/wallpapers/";
 const DEFAULT_WALLPAPER_FILES = [
   "wallpaper1.webp",
@@ -27,7 +28,7 @@ function defaultWallpaperUrl(nameOrPath) {
   return `${DEFAULT_JSDELIVR_GH_BASE}${DEFAULT_WALLPAPER_STATIC_DIR}${nameOrPath}`;
 }
 
-const WALLPAPER_JSDELIVR_GH_BASE = "https://cdn.jsdelivr.net/gh/reeyuki/yukios@main";
+const WALLPAPER_JSDELIVR_GH_BASE = CDN_BASES.MAIN;
 function isBlob(obj) {
   if (!obj) return false;
   return (
@@ -40,23 +41,7 @@ function isBlob(obj) {
 }
 
 function resolveWallpaperCdnUrl(url) {
-  if (typeof url !== "string") return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    try {
-      const u = new URL(url);
-      if (u.hostname === "cdn.jsdelivr.net" && u.pathname.startsWith("/static/wallpapers/")) {
-        return `${WALLPAPER_JSDELIVR_GH_BASE}${u.pathname}${u.search}${u.hash}`;
-      }
-    } catch {}
-    return url;
-  }
-  if (!url.startsWith("/static/wallpapers/")) return url;
-  try {
-    if (typeof window !== "undefined" && window.location?.hostname === "cdn.jsdelivr.net") {
-      return `${WALLPAPER_JSDELIVR_GH_BASE}${url}`;
-    }
-  } catch {}
-  return url;
+  return resolveWallpaperUrl(url);
 }
 
 export const defaultStorage = {

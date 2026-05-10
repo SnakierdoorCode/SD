@@ -108,10 +108,11 @@ export class CategoriesApp {
 
     const win = wm.createWindow(winId, "All Apps");
     win.classList.add("window-root");
-    win.style.width = "600px";
-    win.style.height = "480px";
-    win.style.left = "100px";
-    win.style.top = "60px";
+    win.style.width = "900px";
+    win.style.height = "700px";
+    win.style.left = "50%";
+    win.style.top = "50%";
+    win.style.transform = "translate(-50%, -50%)";
 
     const systemRenderer = new SystemAppRenderer(appLauncher?.appMap);
     const systemCount = systemRenderer.getSystemApps().length;
@@ -121,7 +122,7 @@ export class CategoriesApp {
         <span>All Apps <span class="games-app-count">${systemCount}</span></span>
         ${wm.getWindowControls()}
       </div>
-      <div class="window-content games-app-window" style="width:100%;height:100%;overflow:auto;padding:18px;box-sizing:border-box;">
+      <div class="window-content system-apps-window" style="width:100%;height:100%;overflow:auto;padding:24px;box-sizing:border-box;background: linear-gradient(180deg, rgba(20,20,30,0.95), rgba(15,15,25,0.98));">
         <div id="system-app-container"></div>
       </div>`;
 

@@ -28,21 +28,64 @@ export class CameraApp {
         <span>Camera</span>
         ${this.wm.getWindowControls()}
       </div>
-      <div style="padding:10px; display:flex; flex-direction:column; align-items:center; position:relative;">
-      <div class="video-shell">
-        <video id="camera-video" autoplay playsinline></video>
-        <span id="recording-icon"></span>
-        <span id="recording-timer"></span>
-      </div>
-
-        <div style="margin-top:10px; display:flex; gap:10px;">
-          <button id="take-photo-btn" style="padding:5px 15px;">Take Photo</button>
-          <button id="start-record-btn" style="padding:5px 15px;">Start Recording</button>
-          <button id="stop-record-btn" style="padding:5px 15px;" disabled>Stop Recording</button>
-          <button id="start-screen-btn" style="padding:5px 15px;">Record Screen</button>
-          <button id="open-history-btn" style="padding:5px 15px;">History</button>
+      <div class="camera-app">
+        <div class="camera-viewfinder">
+          <video id="camera-video" autoplay playsinline></video>
+          <div class="camera-rec-status">
+            <span id="recording-icon"></span>
+            <span id="recording-timer"></span>
+          </div>
+          <div class="camera-mode-indicator" id="mode-indicator">Photo</div>
         </div>
-        <a id="download-link" style="display:none; margin-top:10px;"></a>
+
+        <div class="camera-toolbar">
+          <div class="camera-modes">
+            <button class="cam-mode-btn active" data-mode="photo" id="mode-photo">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="6" width="18" height="12" rx="2"/>
+                <circle cx="12" cy="12" r="3"/>
+                <circle cx="17" cy="7" r="1" fill="currentColor" stroke="none"/>
+              </svg>
+              <span>Photo</span>
+            </button>
+            <button class="cam-mode-btn" data-mode="video" id="mode-video">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="6" width="14" height="12" rx="2"/>
+                <polygon points="17,10 21,8 21,16 17,14" fill="currentColor" stroke="none"/>
+              </svg>
+              <span>Video</span>
+            </button>
+            <button class="cam-mode-btn" data-mode="screen" id="mode-screen">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="4" width="20" height="14" rx="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="18" x2="12" y2="21"/>
+              </svg>
+              <span>Screen</span>
+            </button>
+          </div>
+
+          <div class="camera-actions">
+            <button class="cam-action-btn secondary" id="open-history-btn" title="History">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/>
+                <path d="M3 3v9h9"/>
+              </svg>
+            </button>
+
+            <button class="cam-shutter-btn" id="shutter-btn">
+              <span class="shutter-inner"></span>
+            </button>
+
+            <button class="cam-action-btn secondary" id="stop-record-btn" title="Stop" disabled>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2"/>
+              </svg>
+            </button>
+          </div>
+
+          <a id="download-link"></a>
+        </div>
       </div>
     `;
 
@@ -66,29 +109,68 @@ export class CameraApp {
     });
 
     this.video = win.querySelector("#camera-video");
-    this.takePhotoBtn = win.querySelector("#take-photo-btn");
-    this.startRecordBtn = win.querySelector("#start-record-btn");
+    this.shutterBtn = win.querySelector("#shutter-btn");
     this.stopRecordBtn = win.querySelector("#stop-record-btn");
     this.downloadLink = win.querySelector("#download-link");
     this.recordingIcon = win.querySelector("#recording-icon");
     this.recordingTimer = win.querySelector("#recording-timer");
     this.historyBtn = win.querySelector("#open-history-btn");
-    this.startScreenBtn = win.querySelector("#start-screen-btn");
+    this.modeIndicator = win.querySelector("#mode-indicator");
+    this.modeBtns = win.querySelectorAll(".cam-mode-btn");
 
-    win.style.width = "50vw";
-    win.style.height = "70vh";
-    win.style.left = "25vw";
+    this.currentMode = "photo";
+    this.isRecording = false;
+
+    win.style.width = "560px";
+    win.style.height = "520px";
+    win.style.left = "30vw";
     win.style.top = "15vh";
+    win.style.minWidth = "400px";
+    win.style.minHeight = "400px";
 
     this.startCamera();
 
-    this.takePhotoBtn.onclick = () => this.takePhoto();
-    this.startRecordBtn.onclick = () => this.startRecording();
+    // Mode switching
+    this.modeBtns.forEach((btn) => {
+      btn.onclick = () => {
+        this.modeBtns.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        this.currentMode = btn.dataset.mode;
+        this.updateShutterButton();
+        this.modeIndicator.textContent = btn.querySelector("span").textContent;
+      };
+    });
+
+    // Shutter button - action depends on current mode
+    this.shutterBtn.onclick = () => {
+      if (this.currentMode === "photo") {
+        this.takePhoto();
+      } else if (this.currentMode === "video") {
+        if (!this.isRecording) {
+          this.startRecording();
+        }
+      } else if (this.currentMode === "screen") {
+        if (!this.isRecording) {
+          this.startScreenRecording();
+        }
+      }
+    };
+
     this.stopRecordBtn.onclick = () => this.stopRecording();
     this.historyBtn.onclick = () => this.openHistoryWindow();
-    this.startScreenBtn.onclick = () => this.startScreenRecording();
 
+    this.updateShutterButton();
     this.restoreHistory();
+  }
+
+  updateShutterButton() {
+    const inner = this.shutterBtn.querySelector(".shutter-inner");
+    inner.className = "shutter-inner";
+    if (this.currentMode === "photo") {
+      inner.classList.add("photo");
+    } else if (this.currentMode === "video" || this.currentMode === "screen") {
+      inner.classList.add("video");
+    }
   }
 
   async startCamera() {
@@ -111,12 +193,13 @@ export class CameraApp {
     this.downloadLink.href = dataUrl;
     this.downloadLink.download = "photo.png";
     this.downloadLink.textContent = "Download Photo";
-    this.downloadLink.style.display = "block";
+    this.downloadLink.style.display = "flex";
   }
 
   startRecording() {
-    if (!this.stream) return;
+    if (!this.stream || this.isRecording) return;
 
+    this.isRecording = true;
     this.recordedChunks = [];
     this.mediaRecorder = new MediaRecorder(this.stream);
     this.mediaRecorder.ondataavailable = (e) => {
@@ -127,15 +210,18 @@ export class CameraApp {
       const url = URL.createObjectURL(blob);
       this.addRecording(url, blob);
 
+      this.isRecording = false;
       this.stopTimer();
+      this.shutterBtn.classList.remove("recording");
+      this.stopRecordBtn.disabled = true;
       this.downloadLink.href = url;
       this.downloadLink.download = `video-${Date.now()}.webm`;
       this.downloadLink.textContent = "Download Video";
-      this.downloadLink.style.display = "block";
+      this.downloadLink.style.display = "flex";
     };
 
     this.mediaRecorder.start();
-    this.startRecordBtn.disabled = true;
+    this.shutterBtn.classList.add("recording");
     this.stopRecordBtn.disabled = false;
     this.recordingIcon.style.display = "block";
     this.startTimer();
@@ -144,10 +230,6 @@ export class CameraApp {
   stopRecording() {
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       this.mediaRecorder.stop();
-      this.stopTimer();
-      this.recordingIcon.style.display = "none";
-      this.startRecordBtn.disabled = false;
-      this.stopRecordBtn.disabled = true;
     }
   }
 
@@ -169,13 +251,14 @@ export class CameraApp {
         const url = URL.createObjectURL(blob);
         this.addRecording(url, blob);
 
+        this.isRecording = false;
         this.downloadLink.href = url;
         this.downloadLink.download = `screen-${Date.now()}.webm`;
         this.downloadLink.textContent = "Download Screen Recording";
-        this.downloadLink.style.display = "block";
+        this.downloadLink.style.display = "flex";
         this.stopTimer();
         this.recordingIcon.style.display = "none";
-        this.startRecordBtn.disabled = false;
+        this.shutterBtn.classList.remove("recording");
         this.stopRecordBtn.disabled = true;
         this.activeStream.getTracks().forEach((t) => t.stop());
         this.activeStream = null;
@@ -186,8 +269,9 @@ export class CameraApp {
         if (this.mediaRecorder.state !== "inactive") this.mediaRecorder.stop();
       };
 
+      this.isRecording = true;
       this.mediaRecorder.start();
-      this.startRecordBtn.disabled = true;
+      this.shutterBtn.classList.add("recording");
       this.stopRecordBtn.disabled = false;
       this.recordingIcon.style.display = "block";
       this.startTimer();
@@ -243,7 +327,7 @@ export class CameraApp {
         <span>Recordings History</span>
         ${this.wm.getWindowControls()}
       </div>
-      <div id="history-list" style="padding:10px; display:flex; flex-direction:column; gap:5px; overflow-y:auto; height:calc(100% - 30px);"></div>
+      <div id="history-list"></div>
     `;
 
     desktop.appendChild(this.historyWin);
@@ -272,21 +356,14 @@ export class CameraApp {
 
     this.recordings.forEach((rec) => {
       const row = document.createElement("div");
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.justifyContent = "space-between";
-      row.style.gap = "6px";
-      row.style.borderBottom = "1px solid #ccc";
-      row.style.padding = "6px";
+      row.className = "history-item";
 
       const title = document.createElement("span");
       title.textContent = rec.name;
-      title.style.cursor = "pointer";
       title.onclick = () => this.playRecording(rec.url);
 
       const actions = document.createElement("div");
-      actions.style.display = "flex";
-      actions.style.gap = "4px";
+      actions.className = "history-actions";
 
       const renameBtn = document.createElement("button");
       renameBtn.textContent = "Rename";

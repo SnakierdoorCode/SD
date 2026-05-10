@@ -1,4 +1,5 @@
 import { desktop } from "./desktop.js";
+import { isJsDelivrHostname } from "./shared/assetResolver.js";
 
 const AD_STORAGE_KEY = "yukiOS_ads_meta";
 
@@ -30,14 +31,7 @@ const hostname = window.location.hostname;
 
 const isLocal = hostname === "" || hostname === "localhost" || hostname === "127.0.0.1";
 const isFile = window.location.protocol === "file:";
-const isBlocked =
-  hostname.includes("jsdelivr.net") ||
-  hostname.includes("quantil.jsdelivr.net") ||
-  hostname.includes("originfastly.jsdelivr.net") ||
-  hostname.includes("gcore.jsdelivr.net") ||
-  hostname.includes("esm.sh") ||
-  hostname.includes("cdn.statically.io") ||
-  hostname.includes("cdn.staticdelivr.com");
+const isBlocked = isJsDelivrHostname(hostname) || hostname.includes("esm.sh") || hostname.includes("cdn.statically.io");
 
 function shouldEnableAds() {
   if (isFile || isLocal || isBlocked) return false;

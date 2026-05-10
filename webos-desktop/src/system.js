@@ -4,6 +4,7 @@ import { getBrowser } from "./shared/platformUtils.js";
 import { StorageKeys } from "./settings.js";
 import { videos } from "./wallpaperList.js";
 import { createCalendarPopup, setCurrentCalendarMonth } from "./calendar.js";
+import { resolveWallpaperUrl } from "./shared/assetResolver.js";
 
 function isBlob(obj) {
   if (!obj) return false;
@@ -113,24 +114,7 @@ const STATIC_FALLBACK_WALLPAPERS = [
 
 class WallpaperManager {
   static _normalizeWallpaperUrl(url) {
-    if (typeof url !== "string") return null;
-    if (url.startsWith("/static/wallpapers/")) {
-      try {
-        if (window.location?.hostname === "cdn.jsdelivr.net") {
-          return `https://cdn.jsdelivr.net/gh/reeyuki/yukios@main${url}`;
-        }
-      } catch {}
-      return url;
-    }
-    if (!url.startsWith("http://") && !url.startsWith("https://")) return url;
-    try {
-      const u = new URL(url);
-      if (u.hostname !== "cdn.jsdelivr.net") return url;
-      if (!u.pathname.startsWith("/static/wallpapers/")) return url;
-      return `https://cdn.jsdelivr.net/gh/reeyuki/yukios@main${u.pathname}${u.search}${u.hash}`;
-    } catch {
-      return url;
-    }
+    return resolveWallpaperUrl(url);
   }
 
   static _pickStaticFallbackWallpaper() {

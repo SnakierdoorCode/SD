@@ -4,7 +4,7 @@ import { camelize } from "./utils.js";
 import { StorageKeys } from "./settings.js";
 import { speak } from "./clippy.js";
 import { isImageFile } from "./utils.js";
-import { resolveIconUrl } from "./assetUrl.js";
+import { resolveIconUrl } from "./shared/assetResolver.js";
 
 function getStartMenuEl() {
   return document.getElementById("start-menu") || document.querySelector(".start-menu");
@@ -179,6 +179,10 @@ export function setupStartMenu(appLauncher) {
         appLauncher.launch("settings");
         return;
       }
+      if (cat.dataset.cat === "customize") {
+        appLauncher.launch("profileCustomizer");
+        return;
+      }
       document.querySelectorAll(".start-cat").forEach((c) => c.classList.remove("active"));
       document.querySelectorAll(".start-page").forEach((p) => p.classList.remove("active"));
       cat.classList.add("active");
@@ -188,6 +192,9 @@ export function setupStartMenu(appLauncher) {
 
       if (cat.dataset.cat === "favorites") {
         speak("These are your favorites! Great taste.", "Pleased");
+      }
+      if (cat.dataset.cat === "customize") {
+        speak("Let's make your profile look great!", "Congratulate");
       }
     };
   });

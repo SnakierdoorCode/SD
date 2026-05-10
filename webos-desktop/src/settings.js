@@ -7,6 +7,7 @@ const shouldDisableClippy = isMobile || isLocalhost;
 
 export const StorageKeys = {
   username: "yukiOS_username",
+  profilePicture: "yukiOS_profilePicture",
   weather: "yukiOS_weather",
   positionsKey: "yukiOS_desktop:icon-positions",
   favoritesKey: "yukiOS_Favorites",
@@ -124,173 +125,222 @@ export class SettingsApp {
       ${this.wm.getWindowControls()}
     </div>
 
-    <div class="stt-shell">
-
-      <div class="stt-toolbar">
-        <button class="settings-button" id="settingsResetBtn">
-          <i class="fas fa-undo"></i> Reset
-        </button>
-        <button class="settings-button" id="settingsExportBtn" title="Export settings + filesystem">
-          <i class="fas fa-file-export"></i> Export
-        </button>
-        <button class="settings-button" id="settingsImportBtn" title="Import settings + filesystem">
-          <i class="fas fa-file-import"></i> Import
-        </button>
-        <button class="settings-button stt-warning-btn" id="settingsResetTogglesBtn">
-          <i class="fas fa-sliders-h"></i> Reset Settings
-        </button>
-        <button class="settings-button stt-danger-btn" id="settingsDeleteAllBtn">
-          <i class="fas fa-trash"></i> Delete All Data
-        </button>
-        <span id="settingsStatus" class="stt-saved-badge">Saved</span>
+    <div class="settings-shell">
+      <div class="settings-menubar">
+        <div class="settings-menu-item" data-menu="file">
+          <span>File</span>
+          <div class="settings-dropdown">
+            <div class="dropdown-item" data-action="export">
+              <i class="fas fa-file-export"></i> Export
+            </div>
+            <div class="dropdown-item" data-action="import">
+              <i class="fas fa-file-import"></i> Import
+            </div>
+            <div class="dropdown-separator"></div>
+            <div class="dropdown-item danger" data-action="deleteAll">
+              <i class="fas fa-trash"></i> Delete All Data
+            </div>
+          </div>
+        </div>
+        <div class="settings-menu-item" data-menu="actions">
+          <span>Actions</span>
+          <div class="settings-dropdown">
+            <div class="dropdown-item" data-action="reset">
+              <i class="fas fa-undo"></i> Reset to Saved
+            </div>
+            <div class="dropdown-item warning" data-action="resetToggles">
+              <i class="fas fa-sliders-h"></i> Reset Toggles
+            </div>
+          </div>
+        </div>
+        <span id="settingsStatus" class="settings-saved-badge">Saved</span>
       </div>
 
-      <div class="stt-body">
+      <div class="settings-body">
 
-        <div class="stt-card">
-          <div class="stt-card-header">
+        <div class="settings-card">
+          <div class="settings-card-header">
             <i class="fas fa-user"></i>
             <span>User</span>
           </div>
 
-          <div class="stt-row stt-row--stacked">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Username</span>
-              <span class="stt-label-desc">Displayed across the OS interface</span>
+          <div class="settings-row settings-row--stacked">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Username</span>
+              <span class="settings-label-desc">Displayed across the OS interface</span>
             </div>
-            <input id="settingsUsername" type="text" class="stt-input" spellcheck="false"/>
+            <input id="settingsUsername" type="text" class="settings-input" spellcheck="false"/>
           </div>
         </div>
 
-        <div class="stt-card">
-          <div class="stt-card-header">
+        <div class="settings-card">
+          <div class="settings-card-header">
             <i class="fas fa-cog"></i>
             <span>System</span>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Weather</span>
-              <span class="stt-label-desc">Show weather in the taskbar</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Weather</span>
+              <span class="settings-label-desc">Show weather in the taskbar</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsWeather" ${weather ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">macOS Window Controls</span>
-              <span class="stt-label-desc">Use macOS-style traffic light buttons</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">macOS Window Controls</span>
+              <span class="settings-label-desc">Use macOS-style traffic light buttons</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsMacControls" ${macOsControls ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Clippy</span>
-              <span class="stt-label-desc">Show Clippy after boot</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Clippy</span>
+              <span class="settings-label-desc">Show Clippy after boot</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsClippy" ${clippy ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Achievements</span>
-              <span class="stt-label-desc">Enable or disable achievement system</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Achievements</span>
+              <span class="settings-label-desc">Enable or disable achievement system</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsAchievements" ${!achievementsDisabled ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Analytics</span>
-              <span class="stt-label-desc">Allow usage analytics</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Analytics</span>
+              <span class="settings-label-desc">Allow usage analytics</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsAnalytics" ${!analyticsDisabled ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Disable Desktop Stretch Scroll</span>
-              <span class="stt-label-desc">Prevent desktop page from expanding when windows are dragged out</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Disable Desktop Stretch Scroll</span>
+              <span class="settings-label-desc">Prevent desktop page from expanding when windows are dragged out</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsDisableDesktopStretchScroll" ${disableDesktopStretchScroll ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
         </div>
 
-        <div class="stt-card">
-          <div class="stt-card-header">
+        <div class="settings-card">
+          <div class="settings-card-header">
             <i class="fas fa-image"></i>
             <span>Wallpaper</span>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Cycle Wallpapers on Start</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Cycle Wallpapers on Start</span>
             </div>
-            <label class="stt-toggle">
+            <label class="settings-toggle">
               <input type="checkbox" id="settingsCycleWallpaper" ${cycleWallpaper ? "checked" : ""}/>
-              <span class="stt-track"><span class="stt-thumb"></span></span>
+              <span class="settings-track"><span class="settings-thumb"></span></span>
             </label>
           </div>
 
         </div>
 
-        <div class="stt-card">
-          <div class="stt-card-header">
+        <div class="settings-card">
+          <div class="settings-card-header">
             <i class="fas fa-mouse-pointer"></i>
             <span>Cursor</span>
           </div>
 
-          <div class="stt-row stt-row--stacked">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Custom Cursor</span>
-              <span class="stt-label-desc">Upload a PNG/JPG/GIF/WEBP cursor image for the OS</span>
+          <div class="settings-row settings-row--stacked">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Custom Cursor</span>
+              <span class="settings-label-desc">Upload a PNG/JPG/GIF/WEBP cursor image for the OS</span>
             </div>
-            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-              <button class="settings-button" id="settingsCursorUploadBtn">
+            <div class="settings-button-group">
+              <button class="settings-btn" id="settingsCursorUploadBtn">
                 <i class="fas fa-upload"></i> Upload
               </button>
-              <button class="settings-button stt-warning-btn" id="settingsCursorClearBtn" ${
+              <button class="settings-btn settings-btn-warning" id="settingsCursorClearBtn" ${
                 cursorDataUrl ? "" : "disabled"
               }>
                 <i class="fas fa-times"></i> Clear
               </button>
-              <span id="settingsCursorStatus" style="font-size:12px; color:#a1a1aa;">
+              <span id="settingsCursorStatus" class="settings-status-text">
                 ${cursorDataUrl ? "Custom cursor enabled" : "Default cursor"}
               </span>
             </div>
           </div>
 
-          <div class="stt-row">
-            <div class="stt-label-group">
-              <span class="stt-label-title">Cursor Size</span>
-              <span class="stt-label-desc">Scale the uploaded cursor image</span>
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Cursor Size</span>
+              <span class="settings-label-desc">Scale the uploaded cursor image</span>
             </div>
-            <div style="display:flex; gap:10px; align-items:center;">
+            <div class="settings-range-group">
               <input id="settingsCursorSize" type="range" min="16" max="128" step="1" value="${cursorSize}" ${
                 cursorDataUrl ? "" : "disabled"
               }/>
-              <span id="settingsCursorSizeValue" style="min-width:44px; text-align:right; font-variant-numeric: tabular-nums;">${cursorSize}px</span>
+              <span id="settingsCursorSizeValue" class="settings-range-value">${cursorSize}px</span>
             </div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <i class="fas fa-toolbox"></i>
+            <span>Tools</span>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Hide Games</span>
+              <span class="settings-label-desc">Toggle visibility of game icons on desktop</span>
+            </div>
+            <button class="settings-btn" id="settingsHideGamesBtn">
+              <i class="fas fa-eye-slash"></i> Toggle
+            </button>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">Download Page</span>
+              <span class="settings-label-desc">Save a local copy of YukiOS</span>
+            </div>
+            <button class="settings-btn" id="settingsDownloadPageBtn">
+              <i class="fas fa-download"></i> Download
+            </button>
+          </div>
+
+          <div class="settings-row">
+            <div class="settings-label-group">
+              <span class="settings-label-title">YukiCord</span>
+              <span class="settings-label-desc">Join our Discord server</span>
+            </div>
+            <a href="https://discord.gg/2Z8Gvtqt7" target="_blank" rel="noopener noreferrer" class="settings-discord-link">
+              <button class="settings-btn settings-btn-discord">
+                <i class="fab fa-discord"></i> Join
+              </button>
+            </a>
           </div>
         </div>
 
@@ -313,12 +363,12 @@ export class SettingsApp {
     const cursorStatus = win.querySelector("#settingsCursorStatus");
     const cursorSizeInput = win.querySelector("#settingsCursorSize");
     const cursorSizeValue = win.querySelector("#settingsCursorSizeValue");
-    const resetBtn = win.querySelector("#settingsResetBtn");
-    const exportBtn = win.querySelector("#settingsExportBtn");
-    const importBtn = win.querySelector("#settingsImportBtn");
-    const resetTogglesBtn = win.querySelector("#settingsResetTogglesBtn");
-    const deleteAllBtn = win.querySelector("#settingsDeleteAllBtn");
+    const hideGamesBtn = win.querySelector("#settingsHideGamesBtn");
+    const downloadPageBtn = win.querySelector("#settingsDownloadPageBtn");
     const status = win.querySelector("#settingsStatus");
+
+    // Setup menu system
+    this._setupSettingsMenu(win, status);
 
     usernameInput.value = this._settings.username;
 
@@ -330,6 +380,9 @@ export class SettingsApp {
         status.style.opacity = "0";
       }, 2200);
     };
+
+    // Store showStatus for menu actions
+    this._showSettingsStatus = showStatus;
 
     const save = () => {
       const username = usernameInput.value.trim();
@@ -485,11 +538,7 @@ export class SettingsApp {
       showStatus("Toggles reset");
     };
 
-    resetBtn.addEventListener("click", reset);
-    resetTogglesBtn.addEventListener("click", resetToggles);
-    deleteAllBtn.addEventListener("click", this.deleteAllData);
-    if (exportBtn) exportBtn.addEventListener("click", () => this.exportData(showStatus));
-    if (importBtn) importBtn.addEventListener("click", () => this.importData(showStatus));
+    // Menu actions are handled in _setupSettingsMenu
     if (cursorUploadBtn) cursorUploadBtn.addEventListener("click", uploadCursor);
     if (cursorClearBtn)
       cursorClearBtn.addEventListener("click", () => {
@@ -509,6 +558,40 @@ export class SettingsApp {
       cursorSizeInput.addEventListener("change", () => setCursorSize(cursorSizeInput.value));
     }
 
+    if (hideGamesBtn) {
+      hideGamesBtn.addEventListener("click", () => {
+        if (window.__toggleHideGames) {
+          window.__toggleHideGames();
+          showStatus("Games visibility toggled");
+        }
+      });
+    }
+
+    if (downloadPageBtn) {
+      downloadPageBtn.addEventListener("click", async () => {
+        try {
+          const url = "https://yukios.vercel.app/";
+          const filename = "yukios.html";
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`Response status: ${response.status}`);
+          const htmlContent = await response.text();
+          const blob = new Blob([htmlContent], { type: "text/html" });
+          const downloadUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = downloadUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(downloadUrl);
+          showStatus("Download started");
+        } catch (error) {
+          console.error("Download failed:", error);
+          showStatus("Download failed");
+        }
+      });
+    }
+
     usernameInput.addEventListener("blur", save);
     weatherToggle.addEventListener("change", save);
     cycleWallpaperToggle.addEventListener("change", save);
@@ -517,6 +600,92 @@ export class SettingsApp {
     achievementsToggle.addEventListener("change", save);
     analyticsToggle.addEventListener("change", save);
     if (disableDesktopStretchScrollToggle) disableDesktopStretchScrollToggle.addEventListener("change", save);
+  }
+
+  _setupSettingsMenu(win, status) {
+    const menuItems = win.querySelectorAll(".settings-menu-item");
+    let activeMenu = null;
+
+    const closeAllMenus = () => {
+      menuItems.forEach((m) => m.classList.remove("active"));
+      activeMenu = null;
+    };
+
+    menuItems.forEach((menuItem) => {
+      menuItem.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (menuItem.classList.contains("active")) {
+          closeAllMenus();
+        } else {
+          closeAllMenus();
+          menuItem.classList.add("active");
+          activeMenu = menuItem;
+        }
+      });
+
+      menuItem.addEventListener("mouseenter", () => {
+        if (activeMenu && activeMenu !== menuItem) {
+          closeAllMenus();
+          menuItem.classList.add("active");
+          activeMenu = menuItem;
+        }
+      });
+    });
+
+    // Handle menu actions
+    win.querySelectorAll(".dropdown-item[data-action]").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const action = item.dataset.action;
+        const showStatus = this._showSettingsStatus || (() => {});
+
+        switch (action) {
+          case "reset":
+            // Reset to saved values - handled in _bindControls via closure
+            win.querySelector("#settingsUsername").value = this._settings.username;
+            win.querySelector("#settingsWeather").checked = this._settings.weather;
+            win.querySelector("#settingsCycleWallpaper").checked = this._settings.cycleWallpaper;
+            win.querySelector("#settingsMacControls").checked = this._settings.macOsControls;
+            win.querySelector("#settingsClippy").checked = this._settings.clippy;
+            win.querySelector("#settingsAchievements").checked = !this._settings.achievementsDisabled;
+            win.querySelector("#settingsAnalytics").checked = !this._settings.analyticsDisabled;
+            const desktopStretchToggle = win.querySelector("#settingsDisableDesktopStretchScroll");
+            if (desktopStretchToggle) desktopStretchToggle.checked = !!this._settings.disableDesktopStretchScroll;
+            showStatus("Reset to saved values");
+            break;
+          case "resetToggles":
+            if (!confirm("Reset toggles?")) break;
+            win.querySelector("#settingsWeather").checked = true;
+            win.querySelector("#settingsCycleWallpaper").checked = true;
+            win.querySelector("#settingsMacControls").checked = false;
+            win.querySelector("#settingsClippy").checked = false;
+            win.querySelector("#settingsAchievements").checked = true;
+            win.querySelector("#settingsAnalytics").checked = true;
+            if (desktopStretchToggle) desktopStretchToggle.checked = false;
+            // Trigger save
+            win.querySelector("#settingsWeather").dispatchEvent(new Event("change"));
+            showStatus("Toggles reset");
+            break;
+          case "export":
+            this.exportData(showStatus);
+            break;
+          case "import":
+            this.importData(showStatus);
+            break;
+          case "deleteAll":
+            this.deleteAllData();
+            break;
+        }
+        closeAllMenus();
+      });
+    });
+
+    // Close menus when clicking outside
+    const closeHandler = (e) => {
+      if (!win.contains(e.target)) closeAllMenus();
+    };
+    document.addEventListener("click", closeHandler);
+    win.addEventListener("remove", () => document.removeEventListener("click", closeHandler));
   }
 
   _applyDesktopStretchScrollDisabled(disabled) {

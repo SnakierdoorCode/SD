@@ -277,13 +277,12 @@
     <div id="start-menu" class="start-menu">
       <div class="start-sidebar">
         <div class="start-user">
-          <img src="static/icons/guest.webp" />
-          <span style="overflow: auto">reeyuki</span>
+          <img src="static/icons/guest.webp" alt="User avatar" />
+          <span>reeyuki</span>
           <button
             class="start-signout-btn"
             onclick="window.open('https://github.com/Reeyuki/YukiOS', '_blank')"
             title="GitHub Repository"
-            style="background-color: transparent; color: white; transform: scale(2); border: none"
           >
             <i class="fab fa-github"></i>
           </button>
@@ -293,32 +292,13 @@
 
         <div class="start-cat" data-cat="games"><i class="fas fa-gamepad"></i> Games</div>
 
-        <div class="start-cat" data-cat="system"><i class="fas fa-cog"></i> System</div>
+        <div class="start-cat" data-cat="system"><i class="fas fa-screwdriver-wrench"></i> System</div>
 
         <div class="start-cat" data-cat="favorites"><i class="fas fa-star"></i> Favorites</div>
 
-        <div class="start-cat" data-cat="settings"><i class="fas fa-sliders-h"></i> Settings</div>
+        <div class="start-cat" data-cat="customize"><i class="fas fa-circle-user"></i> Customize Profile</div>
 
-        <div class="start-cat docked" id="docked-hide-games">
-          <button
-            class="docked-btn"
-            id="hide-games-btn"
-            onclick="window.__toggleHideGames && window.__toggleHideGames()"
-          >
-            Hide Games
-          </button>
-        </div>
-
-        <div class="start-cat docked" id="docked-download">
-          <button class="docked-btn" onclick="downloadPageFromHtml()">Download single file</button>
-        </div>
-
-        <div class="start-cat docked">
-          <a href="https://discord.gg/2Z8Gvtqt7" target="_blank" rel="noopener noreferrer">
-            <i class="fab fa-discord"></i>
-            YukiCord Server
-          </a>
-        </div>
+        <div class="start-cat" data-cat="settings"><i class="fas fa-cog"></i> Settings</div>
       </div>
 
       <div class="start-content">

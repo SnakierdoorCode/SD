@@ -1,3 +1,5 @@
+import { getLibraryUrl } from "./shared/cdnConfig.js";
+
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
@@ -28,8 +30,8 @@ async function setupClippy() {
   const script = document.createElement("script");
   script.type = "module";
   script.textContent = `
-    import { initAgent } from "https://cdn.jsdelivr.net/npm/clippyjs/dist/index.mjs";
-    import * as agents from "https://cdn.jsdelivr.net/npm/clippyjs/dist/agents/index.mjs";
+    import { initAgent } from "${getLibraryUrl("clippyjs", "module")}";
+    import * as agents from "${getLibraryUrl("clippyjs", "agents")}";
     window.clippyAgent = await initAgent(agents.Clippy);
     window.clippyAgent.show();
     window.clippyAgent.speak("Hi! I'm Clippy. I'll be here if you need me.");

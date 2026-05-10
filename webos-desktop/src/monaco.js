@@ -1,4 +1,5 @@
 import { desktop } from "./desktop.js";
+import { getLibraryUrl } from "./shared/cdnConfig.js";
 import { speak } from "./clippy.js";
 import { decodeDataURLContent } from "./fileDisplay.js";
 import { showConflictDialog } from "./shared/conflictDialog.js";
@@ -26,11 +27,11 @@ export class MonacoApp {
 
     return new Promise((resolve, reject) => {
       const loaderScript = document.createElement("script");
-      loaderScript.src = "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js";
+      loaderScript.src = getLibraryUrl("monaco", "loader");
 
       loaderScript.onload = () => {
         require.config({
-          paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs" }
+          paths: { vs: getLibraryUrl("monaco", "vs") }
         });
 
         require(["vs/editor/editor.main"], () => {

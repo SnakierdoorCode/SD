@@ -1,8 +1,7 @@
 import { FileKind } from "./fs.js";
 import { SystemUtilities } from "./system.js";
 import { videos } from "./wallpaperList.js";
-
-const JSDELIVR_GH_BASE = "https://cdn.jsdelivr.net/gh/reeyuki/yukios@main";
+import { resolveWallpaperUrl, CDN_BASES } from "./shared/assetResolver.js";
 
 function isBlob(obj) {
   if (!obj) return false;
@@ -16,21 +15,7 @@ function isBlob(obj) {
 }
 
 function resolveWallpaperStaticUrl(url) {
-  if (typeof url !== "string") return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    try {
-      const u = new URL(url);
-      if (u.hostname === "cdn.jsdelivr.net" && u.pathname.startsWith("/static/wallpapers/")) {
-        return `${JSDELIVR_GH_BASE}${u.pathname}${u.search}${u.hash}`;
-      }
-    } catch {}
-    return url;
-  }
-  if (!url.startsWith("/static/wallpapers/")) return url;
-  try {
-    if (window.location?.hostname === "cdn.jsdelivr.net") return `${JSDELIVR_GH_BASE}${url}`;
-  } catch {}
-  return url;
+  return resolveWallpaperUrl(url);
 }
 
 function toBlobUrl(content) {

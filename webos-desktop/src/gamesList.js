@@ -1170,6 +1170,16 @@ export const appMap = {
     icon: "fas fa-cubes",
     url: "/static/apps/appcreator/index.html"
   },
+  achievementsApp: {
+    type: "system",
+    title: "Achievements",
+    icon: "fas fa-trophy"
+  },
+  profileCustomizer: {
+    type: "system",
+    title: "Customize Profile",
+    icon: "fas fa-circle-user"
+  },
   kiwiIRC: {
     type: "system",
     title: "kiwiIRC",

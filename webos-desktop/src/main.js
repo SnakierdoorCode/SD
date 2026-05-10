@@ -28,6 +28,7 @@ import { MusicPlayerApp } from "./music.js";
 import { JsDosApp } from "./jsdos.js";
 import { V86App } from "./v86.js";
 import { AchievementsApp } from "./achievements.js";
+import { ProfileCustomizerApp } from "./profileCustomizer.js";
 import { sendAppInstallAnalytics } from "./analytics.js";
 import { setDesktopUI as setGamesDesktopUI } from "./games.js";
 import { AdsManager } from "./ads.js";
@@ -123,6 +124,7 @@ const aboutApp = new AboutApp(windowManager);
 const newsApp = new NewsApp(windowManager);
 const settingsApp = new SettingsApp(windowManager);
 settingsApp.setFileSystemManager(fileSystemManager);
+const profileCustomizerApp = new ProfileCustomizerApp(windowManager, settingsApp);
 const taskManagerApp = new TaskManagerApp(windowManager);
 const weatherApp = new WeatherApp(windowManager);
 const adsApp = new AdsManager(windowManager);
@@ -155,7 +157,9 @@ const appLauncher = new AppLauncher(
   jsDosApp,
   v86app,
   youtubeApp,
-  achievementsApp
+  achievementsApp,
+  adsApp,
+  profileCustomizerApp
 );
 appCreatorApp.setAppLauncher(appLauncher);
 explorerApp.setAppLauncher(appLauncher);
@@ -164,6 +168,7 @@ setGamesDesktopUI(desktopUI);
 explorerApp.setDesktopUI(desktopUI);
 settingsApp.setDesktopUI(desktopUI);
 settingsApp.setAppLauncher(appLauncher);
+profileCustomizerApp.setSettingsApp(settingsApp);
 appCreatorApp.setDesktopUI(desktopUI);
 appCreatorApp.restoreInstalledApps();
 SystemUtilities.startClock();

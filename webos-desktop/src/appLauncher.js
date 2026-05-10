@@ -3,7 +3,14 @@ import { HIGHLIGHTED_GAMES, getGameName, setGameLauncher } from "./games.js";
 import { appMap } from "./gamesList.js";
 import { initializeAppGrid, populateStartMenu, tryGetIcon } from "./startMenu";
 import { IFRAME_ATTRS } from "./shared/iframeAttrs.js";
-import { fetchHtmlAsBlobUrl, resolveUrl, looksLikeHtml, isJsDelivrGhUrl } from "./shared/iframeUtils.js";
+import {
+  fetchHtmlAsBlobUrl,
+  resolveUrl,
+  looksLikeHtml,
+  isJsDelivrGhUrl,
+  CDN_BASES,
+  getCurrentJsDelivrRepoBase
+} from "./shared/assetResolver.js";
 import { initClippy, speak as clippySpeak } from "./clippy.js";
 import {
   initAnalytics,
@@ -43,7 +50,8 @@ export class AppLauncher {
     v86app,
     youtubeApp,
     achievementsApp,
-    adsManager
+    adsManager,
+    profileCustomizerApp
   ) {
     this.wm = windowManager;
     this.fs = fileSystemManager;
@@ -69,6 +77,7 @@ export class AppLauncher {
     this.youtubeApp = youtubeApp;
     this.achievementsApp = achievementsApp;
     this.adsManager = adsManager;
+    this.profileCustomizerApp = profileCustomizerApp;
     this.TRANSPARENCY_ALLOWED_APP_IDS = new Set(["paint", "photopea", "vscode", "liventcord"]);
 
     this.clippyPromise = initClippy();
@@ -204,6 +213,13 @@ export class AppLauncher {
         type: "system",
         title: "Achievements",
         action: () => this.achievementsApp.open()
+      },
+      profileCustomizer: {
+        type: "system",
+        title: "Customize Profile",
+        icon: "fas fa-user-circle",
+        action: () => this.profileCustomizerApp.open(),
+        clippy: { message: "Let's make your profile look great!", animation: "Congratulate" }
       },
       youtube: {
         type: "system",
@@ -520,17 +536,6 @@ player.load("${swfPath}");
 
       const bypassRewriteForApp = type === "game";
       const isJsDelivrGh = window.location.hostname === "cdn.jsdelivr.net" && window.location.pathname.includes("/gh/");
-      const getCurrentJsDelivrRepoBase = () => {
-        try {
-          const here = new URL(window.location.href);
-          if (here.hostname !== "cdn.jsdelivr.net") return null;
-          const p = here.pathname.split("/").filter(Boolean);
-          if (p[0] !== "gh" || !p[1] || !p[2]) return null;
-          return `https://cdn.jsdelivr.net/gh/${p[1]}/${p[2]}`;
-        } catch {
-          return null;
-        }
-      };
 
       let resolvedSource =
         shouldBypassResolution || bypassRewriteForApp ? source : await resolveUrl(source, isJsDelivrGh);

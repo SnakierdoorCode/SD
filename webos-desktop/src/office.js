@@ -2,6 +2,7 @@ import { desktop } from "./desktop.js";
 import { speak } from "./clippy.js";
 import { FileKind } from "./fs.js";
 import { Achievements } from "./achievements.js";
+import { getLibraryUrl } from "./shared/cdnConfig.js";
 class OfficeModuleLoader {
   constructor() {
     this.cache = new Map();
@@ -46,7 +47,7 @@ class OfficeModuleLoader {
   async mammoth() {
     if (this.cache.has("mammoth")) return this.cache.get("mammoth");
 
-    await this.loadScript("https://cdn.jsdelivr.net/npm/mammoth@1.12.0/mammoth.browser.min.js");
+    await this.loadScript(getLibraryUrl("mammoth"));
     const mod = window.mammoth;
     this.cache.set("mammoth", mod);
     return mod;
@@ -55,7 +56,7 @@ class OfficeModuleLoader {
   async xlsx() {
     if (this.cache.has("xlsx")) return this.cache.get("xlsx");
 
-    await this.loadScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
+    await this.loadScript(getLibraryUrl("xlsx"));
     const mod = window.XLSX;
     this.cache.set("xlsx", mod);
     return mod;
@@ -65,8 +66,8 @@ class OfficeModuleLoader {
     if (this.cache.has("handsontable")) return this.cache.get("handsontable");
 
     await Promise.all([
-      this.loadScript("https://cdn.jsdelivr.net/npm/handsontable@12.4.0/dist/handsontable.full.min.js"),
-      this.loadStylesheet("https://cdn.jsdelivr.net/npm/handsontable@12.4.0/dist/handsontable.full.min.css")
+      this.loadScript(getLibraryUrl("handsontable", "js")),
+      this.loadStylesheet(getLibraryUrl("handsontable", "css"))
     ]);
 
     const mod = window.Handsontable;
@@ -78,13 +79,13 @@ class OfficeModuleLoader {
     if (this.cache.has("pdfjs")) return this.cache.get("pdfjs");
 
     await Promise.all([
-      this.loadScript("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"),
-      this.loadScript("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/web/pdf_viewer.min.js"),
-      this.loadStylesheet("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/web/pdf_viewer.min.css")
+      this.loadScript(getLibraryUrl("pdfjs", "js")),
+      this.loadScript(getLibraryUrl("pdfjs", "viewer")),
+      this.loadStylesheet(getLibraryUrl("pdfjs", "viewerCss"))
     ]);
 
     const pdfjs = window.pdfjsLib;
-    pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+    pdfjs.GlobalWorkerOptions.workerSrc = getLibraryUrl("pdfjs", "worker");
 
     this.cache.set("pdfjs", pdfjs);
     this.cache.set("pdfjsViewer", window.pdfjsViewer);
@@ -101,7 +102,7 @@ class OfficeModuleLoader {
   async jszip() {
     if (this.cache.has("jszip")) return this.cache.get("jszip");
 
-    await this.loadScript("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
+    await this.loadScript(getLibraryUrl("jszip"));
     const mod = window.JSZip;
     this.cache.set("jszip", mod);
     return mod;
@@ -110,7 +111,7 @@ class OfficeModuleLoader {
   async docx() {
     if (this.cache.has("docx")) return this.cache.get("docx");
 
-    await this.loadScript("https://cdn.jsdelivr.net/npm/docx@9.6.1/build/index.js");
+    await this.loadScript(getLibraryUrl("docx"));
     const mod = window.docx;
     this.cache.set("docx", mod);
     return mod;
