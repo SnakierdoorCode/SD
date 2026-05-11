@@ -11,6 +11,13 @@ export const appMap = {
     icon: "/static/icons/fiveNightsAtFrickbears.webp",
     title: "Five Nights At Frickbears 3"
   },
+  },
+  GDWeb: {
+    type: "game",
+    url: "https://raw.githack.com/SnakierdoorCode/GAMES/refs/heads/main/RIPS/GDWeb.html",
+    icon: "https://raw.githack.com/SnakierdoorCode/GAMES/blob/main/ICONS/GDimage.webp",
+    title: "GeometryDash Web"
+  },
   helltaker: {
     type: "game",
     url: "/static/games/helltakernew/helltaker/index.html",
